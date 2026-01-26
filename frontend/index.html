@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OIT Automation - Brown University</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>OIT Automation Tool</h1>
+            <p class="subtitle">Brown University MyAccount Automation</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="showTab('connection', this)">Connection</button>
+            <button class="tab-button" onclick="showTab('add', this)">Add Privileges</button>
+            <button class="tab-button" onclick="showTab('revoke', this)">Revoke Privileges</button>
+            <button class="tab-button" onclick="showTab('status', this)">Employment Status</button>
+            <button class="tab-button" onclick="showTab('convert', this)">ID Conversion</button>
+            <button class="tab-button" onclick="showTab('compare', this)">Compare Lists</button>
+        </div>
+
+        <!-- Connection Tab -->
+        <div id="connection" class="tab-content active">
+            <div class="card">
+                <h2>Google Sheets Connection</h2>
+                
+                <!-- Google Sign-In Status Indicator -->
+                <div id="google-auth-indicator" style="margin-bottom: 20px; padding: 12px; border-radius: 8px; background: #f5f5f5; border-left: 4px solid #ccc; display: flex; align-items: center; gap: 10px;">
+                    <div id="auth-status-icon" style="font-size: 20px;">⚪</div>
+                    <div>
+                        <strong id="auth-status-text">Not signed in</strong>
+                        <div id="auth-status-details" style="font-size: 0.9em; color: #666; margin-top: 4px;">
+                            Click the button below to sign in with Google
+                        </div>
+                    </div>
+                </div>
+                
+                <p><strong>Connect with Google Account</strong></p>
+                <p>Click the button below to sign in with your Google account. You'll see a popup with all your Google accounts to choose from.</p>
+                
+                <div class="form-group" style="text-align: center; margin: 20px 0;">
+                    <div id="g_id_signin" style="display: inline-block;"></div>
+                </div>
+                
+                <div id="oauth-status" class="status-message"></div>
+                
+                <div class="form-group">
+                    <label for="sheet-url">Google Sheet URL: <span style="color: red;">*</span></label>
+                    <input type="text" id="sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+                </div>
+                <div class="form-group">
+                    <label for="sheet-name">Worksheet Name: <span style="color: red;">*</span></label>
+                    <input type="text" id="sheet-name" placeholder="Adding/Revoking (JS )" required>
+                </div>
+                <button onclick="connectSheetsWithToken()" class="btn btn-primary" id="connect-btn" disabled>Connect to Sheets</button>
+                <div id="sheets-status" class="status-message"></div>
+            </div>
+
+            <div class="card">
+                <h2>MyAccount Login</h2>
+                <div class="form-group">
+                    <label for="username">Username: <span style="color: red;">*</span></label>
+                    <input type="text" id="username" placeholder="Your Brown username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password: <span style="color: red;">*</span></label>
+                    <input type="password" id="password" placeholder="Your password" required>
+                </div>
+                <button onclick="login()" class="btn btn-primary">Login</button>
+                <div id="login-status" class="status-message"></div>
+            </div>
+        </div>
+
+        <!-- Add Privileges Tab -->
+        <div id="add" class="tab-content">
+            <div class="card">
+                <h2>Add Privileges</h2>
+                <p>Reads user IDs from column <select id="add-read-column" class="column-select">
+                    <option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4" selected>E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select></p>
+                <div id="add-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
+                    <span id="add-sheet-indicator">⚪ No sheet connected</span>
+                </div>
+                <div class="form-group">
+                    <label for="add-app-name">Application Name:</label>
+                    <input type="text" id="add-app-name" placeholder="Slate [SLATE]">
+                </div>
+                <div class="form-group">
+                    <label for="add-dp-number">DP Number:</label>
+                    <input type="text" id="add-dp-number" placeholder="575922">
+                </div>
+                <div class="form-group">
+                    <label for="add-performed-by-name">Performed By Name: <span style="color: red;">*</span></label>
+                    <input type="text" id="add-performed-by-name" placeholder="e.g., John Doe" required>
+                    <small style="color: #666; display: block; margin-top: 4px;">
+                        Enter the full name that will appear in the autocomplete field
+                    </small>
+                </div>
+                <button onclick="addPrivileges()" class="btn btn-primary">Add Privileges</button>
+                <div id="add-status" class="status-message"></div>
+                <div id="add-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- Revoke Privileges Tab -->
+        <div id="revoke" class="tab-content">
+            <div class="card">
+                <h2>Revoke Privileges</h2>
+                <p>Reads user IDs from column <select id="revoke-read-column" class="column-select">
+                    <option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5" selected>F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select></p>
+                <div id="revoke-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
+                    <span id="revoke-sheet-indicator">⚪ No sheet connected</span>
+                </div>
+                <div class="form-group">
+                    <label for="revoke-app-name">Application Name:</label>
+                    <input type="text" id="revoke-app-name" placeholder="SLATE">
+                </div>
+                <div class="form-group">
+                    <label for="revoke-dp-number">DP Number:</label>
+                    <input type="text" id="revoke-dp-number" placeholder="575922">
+                </div>
+                <button onclick="revokePrivileges()" class="btn btn-primary">Revoke Privileges</button>
+                <div id="revoke-status" class="status-message"></div>
+                <div id="revoke-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- Employment Status Tab -->
+        <div id="status" class="tab-content">
+            <div class="card">
+                <h2>Get Employment Status</h2>
+                <p>Reads IDs from column <select id="status-read-column" class="column-select">
+                    <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select>, writes status to column <select id="status-write-column" class="column-select">
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G" selected>G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                </select> and source to column <select id="status-source-column" class="column-select">
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J" selected>J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                </select></p>
+                <div id="status-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
+                    <span id="status-sheet-indicator">⚪ No sheet connected</span>
+                </div>
+                <div class="form-group">
+                    <label for="status-ids">User IDs (optional - leave empty to read from sheet):</label>
+                    <textarea id="status-ids" rows="10" placeholder="Enter user IDs, one per line (or leave empty to read from sheet)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="status-id-type">ID Type:</label>
+                    <select id="status-id-type">
+                        <option value="SID">Short ID (SID)</option>
+                        <option value="BID">Brown ID (BID)</option>
+                        <option value="N">Name</option>
+                    </select>
+                </div>
+                <button onclick="getEmploymentStatus()" class="btn btn-primary">Get Status</button>
+                <div id="status-status" class="status-message"></div>
+                <div id="status-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- ID Conversion Tab -->
+        <div id="convert" class="tab-content">
+            <div class="card">
+                <h2>Convert IDs</h2>
+                <p>Reads from column <select id="convert-read-column" class="column-select">
+                    <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select>, writes results to column <select id="convert-write-column" class="column-select">
+                    <option value="A">A</option><option value="B" selected>B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                </select></p>
+                <div id="convert-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
+                    <span id="convert-sheet-indicator">⚪ No sheet connected</span>
+                </div>
+                <div class="form-group">
+                    <label for="convert-ids">User IDs (optional - leave empty to read from sheet):</label>
+                    <textarea id="convert-ids" rows="10" placeholder="Enter user IDs, one per line (or leave empty to read from sheet)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="convert-from-type">From Type:</label>
+                    <select id="convert-from-type">
+                        <option value="NETID">Net ID</option>
+                        <option value="BID">Brown ID</option>
+                        <option value="SID">Short ID</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="convert-to-type">To Type:</label>
+                    <select id="convert-to-type">
+                        <option value="SID">Short ID (SID)</option>
+                    </select>
+                </div>
+                <button onclick="convertIds()" class="btn btn-primary">Convert IDs</button>
+                <div id="convert-status" class="status-message"></div>
+                <div id="convert-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- Compare Lists Tab -->
+        <div id="compare" class="tab-content">
+            <div class="card">
+                <h2>Compare Lists</h2>
+                <p>List 1 from column <select id="compare-list1-column" class="column-select">
+                    <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select>, List 2 from column <select id="compare-list2-column" class="column-select">
+                    <option value="0">A</option><option value="1" selected>B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                </select>, writes "To Add" to column <select id="compare-toadd-column" class="column-select">
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E" selected>E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                </select> and "To Remove" to column <select id="compare-toremove-column" class="column-select">
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F" selected>F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                </select></p>
+                <div id="compare-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
+                    <span id="compare-sheet-indicator">⚪ No sheet connected</span>
+                </div>
+                <div class="form-group">
+                    <label for="list1">List 1 (optional - leave empty to read from sheet):</label>
+                    <textarea id="list1" rows="10" placeholder="Enter items, one per line (or leave empty to read from sheet)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="list2">List 2 (optional - leave empty to read from sheet):</label>
+                    <textarea id="list2" rows="10" placeholder="Enter items, one per line (or leave empty to read from sheet)"></textarea>
+                </div>
+                <button onclick="compareLists()" class="btn btn-primary">Compare Lists</button>
+                <div id="compare-status" class="status-message"></div>
+                <div id="compare-results" class="results"></div>
+            </div>
+        </div>
+
+        <footer>
+            <button onclick="logout()" class="btn btn-secondary">Logout & Close Browser</button>
+        </footer>
+    </div>
+
+    <script src="app.js?v=20260117v1"></script>
+</body>
+</html>
+
