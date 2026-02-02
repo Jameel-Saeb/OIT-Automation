@@ -7,6 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from datetime import datetime
 import time
 import platform
 
@@ -918,6 +919,19 @@ class AutomationService:
             print(f"Final URL: {self.driver.current_url}")
             return False
     
+    def _get_next_attn_date(self):
+        """Get the next 01/31 or 06/30 (whichever comes first in the future)"""
+        now = datetime.now()
+        year = now.year
+        jan_31 = datetime(year, 1, 31)
+        jun_30 = datetime(year, 6, 30)
+        if now < jan_31:
+            return f"01/31/{year}"
+        elif now < jun_30:
+            return f"06/30/{year}"
+        else:
+            return f"01/31/{year + 1}"
+    
     def add_privileges(self, ids, app_name, comment, performed_by_name):
         """
         Add privileges to a list of user IDs
@@ -958,6 +972,25 @@ class AutomationService:
                     continue
                 
                 time.sleep(2)
+                
+                # Extract Employment Source (for Banner-specific logic)
+                employment_source = ""
+                try:
+                    source_selectors = [
+                        (By.XPATH, "//label[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                        (By.XPATH, "//b[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                        (By.XPATH, "//*[contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                    ]
+                    for sel_type, sel_val in source_selectors:
+                        try:
+                            source_div = self.driver.find_element(sel_type, sel_val)
+                            employment_source = (source_div.text or "").strip()
+                            print(f"  📋 Employment Source: '{employment_source}'")
+                            break
+                        except:
+                            continue
+                except Exception as e:
+                    print(f"  ⚠️  Could not extract Employment Source: {str(e)[:80]}")
                 
                 # Navigate to AdminID - Current
                 button = self.driver.find_element(By.LINK_TEXT, "AdminID - Current")
@@ -1162,6 +1195,29 @@ class AutomationService:
                     raise Exception(f"No autocomplete suggestions appeared for '{performed_by_name}'. ChromeDriver session kept alive for debugging.")
                 
                 time.sleep(1)  # Wait for selection to register
+                
+                # If Employment Source is Banner: set attn_type and attn_date
+                if employment_source and "Banner" in employment_source:
+                    print(f"  📋 Employment Source is Banner - setting attn_type and attn_date")
+                    try:
+                        attn_type_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_type']")
+                        attn_type_elem.click()
+                        time.sleep(0.5)
+                        attn_option = self.driver.find_element(By.XPATH, "//*[@id='attn_type']/option[3]")
+                        attn_option.click()
+                        print(f"  ✅ Selected attn_type option 3")
+                        time.sleep(0.5)
+                        
+                        attn_date_str = self._get_next_attn_date()
+                        attn_date_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_date']")
+                        attn_date_elem.clear()
+                        attn_date_elem.send_keys(attn_date_str)
+                        print(f"  ✅ Set attn_date to {attn_date_str}")
+                        time.sleep(0.5)
+                    except Exception as e:
+                        print(f"  ⚠️  Could not set attn_type/attn_date (Banner): {str(e)[:100]}")
+                else:
+                    print(f"  📋 Employment Source is not Banner - skipping attn_type/attn_date")
                 
                 # Add comment
                 textarea = self.driver.find_element(By.NAME, "comments")
