@@ -611,15 +611,7 @@ async function addPrivileges() {
     if (!sheetInfo) return;
     
     const appName = document.getElementById('add-app-name').value;
-    let dpNumber = document.getElementById('add-dp-number').value.trim();
-    // Normalize DP prefix - ensure it's always uppercase "DP"
-    if (dpNumber) {
-        if (dpNumber.toUpperCase().startsWith('DP')) {
-            dpNumber = 'DP' + dpNumber.substring(2);
-        } else {
-            dpNumber = 'DP' + dpNumber;
-        }
-    }
+    const comment = document.getElementById('add-comment').value.trim();
     const performedByName = document.getElementById('add-performed-by-name').value;
     const columnIndex = parseInt(document.getElementById('add-read-column').value);
     
@@ -646,7 +638,7 @@ async function addPrivileges() {
             sheet_url: sheetInfo.url,
             sheet_name: sheetInfo.name,
             app_name: appName,
-            dp_number: dpNumber,
+            comment: comment,
             performed_by_name: performedByName.trim(),
             column_index: columnIndex,
             oauth_state: oauthState
@@ -703,15 +695,7 @@ async function revokePrivileges() {
     }
     
     const appName = document.getElementById('revoke-app-name').value;
-    let dpNumber = document.getElementById('revoke-dp-number').value.trim();
-    // Normalize DP prefix - ensure it's always uppercase "DP"
-    if (dpNumber) {
-        if (dpNumber.toUpperCase().startsWith('DP')) {
-            dpNumber = 'DP' + dpNumber.substring(2);
-        } else {
-            dpNumber = 'DP' + dpNumber;
-        }
-    }
+    const comment = document.getElementById('revoke-comment').value.trim();
     const columnIndex = parseInt(document.getElementById('revoke-read-column').value);
     
     clearStatus('revoke-status');
@@ -725,7 +709,7 @@ async function revokePrivileges() {
             sheet_url: sheetInfo.url,
             sheet_name: sheetInfo.name,
             app_name: appName,
-            dp_number: dpNumber,
+            comment: comment,
             column_index: columnIndex
         };
         

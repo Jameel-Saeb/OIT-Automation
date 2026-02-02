@@ -918,14 +918,14 @@ class AutomationService:
             print(f"Final URL: {self.driver.current_url}")
             return False
     
-    def add_privileges(self, ids, app_name, dp_number, performed_by_name):
+    def add_privileges(self, ids, app_name, comment, performed_by_name):
         """
         Add privileges to a list of user IDs
         
         Args:
             ids: List of user IDs
             app_name: Application name to grant privileges for
-            dp_number: DP number for comments
+            comment: Comment text to add to the privilege record (displayed exactly as entered)
             performed_by_name: Name to enter in "Performed By" autocomplete field
         """
         if not self.driver:
@@ -1165,8 +1165,8 @@ class AutomationService:
                 
                 # Add comment
                 textarea = self.driver.find_element(By.NAME, "comments")
-                existing_text = textarea.get_attribute("value")
-                new_text = existing_text + " Added  " + dp_number
+                existing_text = textarea.get_attribute("value") or ""
+                new_text = (existing_text + " " + comment).strip() if comment else existing_text
                 textarea.clear()
                 textarea.send_keys(new_text)
                 
@@ -1274,8 +1274,8 @@ class AutomationService:
                             
                             # Add comment
                             textarea = self.driver.find_element(By.NAME, "comments")
-                            existing_text = textarea.get_attribute("value")
-                            new_text = existing_text + " Revoked " + dp_number
+                            existing_text = textarea.get_attribute("value") or ""
+                            new_text = (existing_text + " " + comment).strip() if comment else existing_text
                             textarea.clear()
                             textarea.send_keys(new_text)
                             

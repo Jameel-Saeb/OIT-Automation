@@ -90,8 +90,11 @@
                     <input type="text" id="add-app-name" placeholder="Slate [SLATE]">
                 </div>
                 <div class="form-group">
-                    <label for="add-dp-number">DP Number:</label>
-                    <input type="text" id="add-dp-number" placeholder="575922">
+                    <label for="add-comment">Comment:</label>
+                    <textarea id="add-comment" rows="3" placeholder="Enter comment to add to the privilege record (e.g., Added DP575922, Approved for fall 2025)"></textarea>
+                    <small style="color: #666; display: block; margin-top: 4px;">
+                        This text will appear exactly as entered in the comments field
+                    </small>
                 </div>
                 <div class="form-group">
                     <label for="add-performed-by-name">Performed By Name: <span style="color: red;">*</span></label>
@@ -121,8 +124,11 @@
                     <input type="text" id="revoke-app-name" placeholder="SLATE">
                 </div>
                 <div class="form-group">
-                    <label for="revoke-dp-number">DP Number:</label>
-                    <input type="text" id="revoke-dp-number" placeholder="575922">
+                    <label for="revoke-comment">Comment:</label>
+                    <textarea id="revoke-comment" rows="3" placeholder="Enter comment to add to the privilege record (e.g., Revoked DP575922, No longer needed)"></textarea>
+                    <small style="color: #666; display: block; margin-top: 4px;">
+                        This text will appear exactly as entered in the comments field
+                    </small>
                 </div>
                 <button onclick="revokePrivileges()" class="btn btn-primary">Revoke Privileges</button>
                 <div id="revoke-status" class="status-message"></div>
