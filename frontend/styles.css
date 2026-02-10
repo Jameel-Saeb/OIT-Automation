@@ -157,6 +157,21 @@ header h1 {
     background: #5a6268;
 }
 
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .status-message {
     margin-top: 15px;
     padding: 12px;
@@ -316,5 +331,105 @@ table tr:hover {
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 3px rgba(102, 126, 234, 0.3);
+}
+
+/* Convert ID: sentence with inline dropdown and chips */
+.convert-sentence {
+    line-height: 2;
+    margin-bottom: 1rem;
+}
+.convert-inline-select {
+    width: auto;
+    min-width: 52px;
+    display: inline-block;
+    padding: 4px 8px;
+    margin: 0 2px;
+}
+.convert-add-inline {
+    position: relative;
+    display: inline;
+}
+.convert-add-type-btn {
+    display: inline-block;
+    padding: 6px 12px;
+    margin-left: 0;
+    font-size: 0.9em;
+    color: #667eea;
+    background: #f0f0f8;
+    border: 1px solid #c0c0e0;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.convert-add-type-btn:hover {
+    background: #e8e8f5;
+    border-color: #667eea;
+}
+.convert-type-dropdown {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 4px;
+    min-width: 180px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    z-index: 100;
+    overflow: hidden;
+}
+.convert-type-dropdown.open {
+    display: block;
+}
+.convert-type-dropdown button[role="option"] {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    text-align: left;
+    border: none;
+    background: #fff;
+    font-size: 1em;
+    cursor: pointer;
+}
+.convert-type-dropdown button[role="option"]:hover {
+    background: #f0f0f8;
+}
+.convert-write-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 2px;
+    padding: 2px 6px 2px 8px;
+    background: #f0f0f8;
+    border-radius: 6px;
+    border: 1px solid #e0e0e8;
+    white-space: nowrap;
+}
+.convert-write-chip strong {
+    font-weight: 600;
+    color: #333;
+}
+.convert-write-chip .convert-chip-col {
+    width: auto;
+    min-width: 44px;
+    padding: 2px 6px;
+    font-size: 0.95em;
+}
+.convert-write-chip .convert-chip-remove {
+    padding: 0 6px;
+    font-size: 1.1em;
+    line-height: 1;
+    color: #888;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.convert-write-chip .convert-chip-remove:hover {
+    color: #c00;
+}
+.convert-writes-and {
+    color: #666;
+    margin: 0 4px;
 }
 

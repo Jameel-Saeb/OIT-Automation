@@ -6,6 +6,18 @@
     <title>OIT Automation - Brown University</title>
     <link rel="stylesheet" href="styles.css">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+    window.toggleConvertTypeDropdown = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        var dd = document.getElementById('convert-type-dropdown');
+        var btn = document.getElementById('convert-add-type-btn');
+        if (!dd || !btn) return;
+        var isOpen = dd.classList.toggle('open');
+        dd.style.display = isOpen ? 'block' : 'none';
+        btn.setAttribute('aria-expanded', isOpen);
+        dd.setAttribute('aria-hidden', !isOpen);
+    };
+    </script>
 </head>
 <body>
     <div class="container">
@@ -103,7 +115,8 @@
                         Enter the full name that will appear in the autocomplete field
                     </small>
                 </div>
-                <button onclick="addPrivileges()" class="btn btn-primary">Add Privileges</button>
+                <button onclick="addPrivileges()" class="btn btn-primary" id="add-start-btn">Add Privileges</button>
+                <button onclick="abortAutomation('add')" class="btn btn-danger" id="add-abort-btn" disabled style="margin-left: 10px;" title="Shows when operation is running">Abort</button>
                 <div id="add-status" class="status-message"></div>
                 <div id="add-results" class="results"></div>
             </div>
@@ -130,7 +143,8 @@
                         This text will appear exactly as entered in the comments field
                     </small>
                 </div>
-                <button onclick="revokePrivileges()" class="btn btn-primary">Revoke Privileges</button>
+                <button onclick="revokePrivileges()" class="btn btn-primary" id="revoke-start-btn">Revoke Privileges</button>
+                <button onclick="abortAutomation('revoke')" class="btn btn-danger" id="revoke-abort-btn" disabled style="margin-left: 10px;" title="Shows when operation is running">Abort</button>
                 <div id="revoke-status" class="status-message"></div>
                 <div id="revoke-results" class="results"></div>
             </div>
@@ -141,11 +155,11 @@
             <div class="card">
                 <h2>Get Employment Status</h2>
                 <p>Reads IDs from column <select id="status-read-column" class="column-select">
-                    <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                    <option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4" selected>E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
                 </select>, writes status to column <select id="status-write-column" class="column-select">
                     <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G" selected>G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
                 </select> and source to column <select id="status-source-column" class="column-select">
-                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J" selected>J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H" selected>H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
                 </select></p>
                 <div id="status-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
                     <span id="status-sheet-indicator">⚪ No sheet connected</span>
@@ -162,7 +176,8 @@
                         <option value="N">Name</option>
                     </select>
                 </div>
-                <button onclick="getEmploymentStatus()" class="btn btn-primary">Get Status</button>
+                <button onclick="getEmploymentStatus()" class="btn btn-primary" id="status-start-btn">Get Status</button>
+                <button onclick="abortAutomation('status')" class="btn btn-danger" id="status-abort-btn" disabled style="margin-left: 10px;" title="Shows when operation is running">Abort</button>
                 <div id="status-status" class="status-message"></div>
                 <div id="status-results" class="results"></div>
             </div>
@@ -172,11 +187,21 @@
         <div id="convert" class="tab-content">
             <div class="card">
                 <h2>Convert IDs</h2>
-                <p>Reads from column <select id="convert-read-column" class="column-select">
-                    <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
-                </select>, writes results to column <select id="convert-write-column" class="column-select">
-                    <option value="A">A</option><option value="B" selected>B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
-                </select></p>
+                <p class="convert-sentence" id="convert-sentence">
+                    Reads from column <select id="convert-read-column" class="column-select convert-inline-select">
+                        <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
+                    </select>
+                    <span id="convert-writes-prefix"></span><span id="convert-writes-inline"></span><span class="convert-writes-sep" id="convert-writes-sep"></span> .
+                </p>
+                <div class="convert-add-row" id="convert-type-wrapper" style="position:relative;z-index:10002;">
+                    <button type="button" class="convert-add-type-btn" id="convert-add-type-btn" aria-haspopup="listbox" aria-expanded="false" style="pointer-events:auto;cursor:pointer;position:relative;z-index:10003;" onclick="window.toggleConvertTypeDropdown(event); return false;">Add type to convert to ▼</button>
+                    <div id="convert-type-dropdown" class="convert-type-dropdown" role="listbox" aria-hidden="true" style="display: none;">
+                        <button type="button" role="option" data-type="SID">Short ID (SID)</button>
+                        <button type="button" role="option" data-type="NETID">Net ID</button>
+                        <button type="button" role="option" data-type="BID">Brown ID</button>
+                        <button type="button" role="option" data-type="BROWN_EMAIL">Brown Email</button>
+                    </div>
+                </div>
                 <div id="convert-connection-status" class="connection-indicator" style="margin-bottom: 15px; padding: 10px; border-radius: 5px; background: #f0f0f0;">
                     <span id="convert-sheet-indicator">⚪ No sheet connected</span>
                 </div>
@@ -189,16 +214,12 @@
                     <select id="convert-from-type">
                         <option value="NETID">Net ID</option>
                         <option value="BID">Brown ID</option>
+                        <option value="BROWN_EMAIL">Brown Email</option>
                         <option value="SID">Short ID</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label for="convert-to-type">To Type:</label>
-                    <select id="convert-to-type">
-                        <option value="SID">Short ID (SID)</option>
-                    </select>
-                </div>
-                <button onclick="convertIds()" class="btn btn-primary">Convert IDs</button>
+                <button onclick="convertIds()" class="btn btn-primary" id="convert-start-btn">Convert IDs</button>
+                <button onclick="abortAutomation('convert')" class="btn btn-danger" id="convert-abort-btn" disabled style="margin-left: 10px;" title="Shows when operation is running">Abort</button>
                 <div id="convert-status" class="status-message"></div>
                 <div id="convert-results" class="results"></div>
             </div>
@@ -239,7 +260,51 @@
         </footer>
     </div>
 
-    <script src="app.js?v=20260117v1"></script>
+    <script src="app.js?v=dropdown20260209"></script>
+    <script>
+    (function initConvertDropdownInline() {
+        function setup() {
+            var wrapper = document.getElementById('convert-type-wrapper');
+            var dd = document.getElementById('convert-type-dropdown');
+            var btn = document.getElementById('convert-add-type-btn');
+            if (!wrapper || !dd || !btn) return;
+            dd.querySelectorAll('button[role="option"]').forEach(function(opt) {
+                opt.addEventListener('click', function(ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    var type = this.getAttribute('data-type');
+                    if (typeof convertToSelections !== 'undefined' && type) {
+                        if (!convertToSelections.some(function(s) { return s.type === type; })) {
+                            convertToSelections.push({
+                                type: type,
+                                label: (typeof CONVERT_TYPE_LABELS !== 'undefined' ? CONVERT_TYPE_LABELS[type] : type),
+                                column: (typeof getNextDefaultConvertColumn === 'function' ? getNextDefaultConvertColumn() : 'B')
+                            });
+                            if (typeof renderConvertWritesList === 'function') renderConvertWritesList();
+                        }
+                    }
+                    dd.classList.remove('open');
+                    dd.style.display = 'none';
+                    btn.setAttribute('aria-expanded', 'false');
+                    dd.setAttribute('aria-hidden', 'true');
+                });
+            });
+            document.addEventListener('click', function(ev) {
+                if (dd.classList.contains('open') && !wrapper.contains(ev.target)) {
+                    dd.classList.remove('open');
+                    dd.style.display = 'none';
+                    btn.setAttribute('aria-expanded', 'false');
+                    dd.setAttribute('aria-hidden', 'true');
+                }
+            });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setup);
+        } else {
+            setup();
+        }
+    })();
+    </script>
 </body>
 </html>
 

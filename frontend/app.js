@@ -1,5 +1,26 @@
-// Version: 2026-01-17-v1 - Added column selection dropdowns
+// Version: 2026-01-17-v1 - Added column selection dropdowns, abort support
 const API_BASE_URL = 'http://localhost:5001/api';
+
+// Show/hide Start and Abort buttons during long-running operations
+function setOperationRunning(tab, running) {
+    const startBtn = document.getElementById(`${tab}-start-btn`);
+    const abortBtn = document.getElementById(`${tab}-abort-btn`);
+    if (startBtn) startBtn.disabled = running;
+    if (abortBtn) {
+        abortBtn.disabled = !running;
+        abortBtn.style.opacity = running ? '1' : '0.5';
+        abortBtn.title = running ? 'Click to stop the current operation' : 'Available when operation is running';
+    }
+}
+
+async function abortAutomation(tab) {
+    try {
+        await apiCall('/automation/abort', 'POST');
+        showStatus(`${tab}-status`, 'Abort requested. Stopping after current item...', 'info');
+    } catch (error) {
+        showStatus(`${tab}-status`, `Abort failed: ${error.message}`, 'error');
+    }
+}
 
 // Google OAuth token storage
 let googleAccessToken = null;
@@ -623,6 +644,7 @@ async function addPrivileges() {
     clearStatus('add-status');
     clearResults('add-results');
     showStatus('add-status', 'Refreshing sheet data and processing...', 'info');
+    setOperationRunning('add', true);  // Show abort button immediately
     
     try {
         const oauthState = getOAuthState();
@@ -654,6 +676,8 @@ async function addPrivileges() {
         showResults('add-results', result.results, formatAddResults);
     } catch (error) {
         showStatus('add-status', `Error: ${error.message}`, 'error');
+    } finally {
+        setOperationRunning('add', false);
     }
 }
 
@@ -701,6 +725,7 @@ async function revokePrivileges() {
     clearStatus('revoke-status');
     clearResults('revoke-results');
     showStatus('revoke-status', 'Reading IDs from sheet and processing...', 'info');
+    setOperationRunning('revoke', true);  // Show abort button immediately
     
     try {
         const serviceAccountData = await getServiceAccountData();
@@ -729,6 +754,8 @@ async function revokePrivileges() {
         showResults('revoke-results', result.results, formatRevokeResults);
     } catch (error) {
         showStatus('revoke-status', `Error: ${error.message}`, 'error');
+    } finally {
+        setOperationRunning('revoke', false);
     }
 }
 
@@ -744,11 +771,13 @@ async function getEmploymentStatus() {
         return;
     }
     
-    // Refresh sheet data before processing
+    // Refresh sheet data before processing - show abort button immediately
+    setOperationRunning('status', true);
     showStatus('status-status', 'Refreshing sheet data...', 'info');
     const refreshed = await refreshSheetConnection();
     if (!refreshed) {
         showStatus('status-status', 'Failed to refresh sheet connection', 'error');
+        setOperationRunning('status', false);
         return;
     }
     
@@ -789,6 +818,8 @@ async function getEmploymentStatus() {
         showResults('status-results', result.results, formatStatusResults);
     } catch (error) {
         showStatus('status-status', `Error: ${error.message}`, 'error');
+    } finally {
+        setOperationRunning('status', false);
     }
 }
 
@@ -813,15 +844,114 @@ function formatStatusResults(results) {
     return html;
 }
 
-// Convert IDs
-async function convertIds() {
-    // Get sheet info from global connection
-    const sheetInfo = requireSheetConnection('convert-status');
-    if (!sheetInfo) {
+// Convert IDs — multi-select UI (sentence + dropdown)
+const CONVERT_TYPE_LABELS = { SID: 'Short ID (SID)', NETID: 'Net ID', BID: 'Brown ID', BROWN_EMAIL: 'Brown Email' };
+const CONVERT_DEFAULT_COLUMNS = ['B', 'C', 'D', 'E'];
+const COLUMN_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+let convertToSelections = [];
+
+function getConvertColumnOptionsHtml(selected) {
+    return COLUMN_LETTERS.map(c => `<option value="${c}"${c === selected ? ' selected' : ''}>${c}</option>`).join('');
+}
+
+function getNextDefaultConvertColumn() {
+    const used = new Set(convertToSelections.map(s => s.column));
+    for (const c of CONVERT_DEFAULT_COLUMNS) {
+        if (!used.has(c)) return c;
+    }
+    for (const c of COLUMN_LETTERS) {
+        if (!used.has(c)) return c;
+    }
+    return 'Z';
+}
+
+function renderConvertWritesList() {
+    const el = document.getElementById('convert-writes-inline');
+    const prefix = document.getElementById('convert-writes-prefix');
+    const sep = document.getElementById('convert-writes-sep');
+    if (!el) return;
+    if (prefix) prefix.textContent = convertToSelections.length > 0 ? 'and writes ' : '';
+    if (sep) sep.textContent = convertToSelections.length > 0 ? ', ' : '';
+    if (convertToSelections.length === 0) {
+        el.innerHTML = '';
         return;
     }
+    const parts = convertToSelections.map((s, i) => {
+        const and = i > 0 ? '<span class="convert-writes-and">and</span>' : '';
+        return and + `<span class="convert-write-chip" data-type="${s.type}"><strong>${s.label}</strong> in column <select class="convert-chip-col" data-type="${s.type}">${getConvertColumnOptionsHtml(s.column)}</select><button type="button" class="convert-chip-remove" aria-label="Remove">×</button></span>`;
+    });
+    el.innerHTML = parts.join('');
+    el.querySelectorAll('.convert-chip-col').forEach(sel => {
+        sel.addEventListener('change', function() {
+            const s = convertToSelections.find(x => x.type === this.dataset.type);
+            if (s) s.column = this.value;
+        });
+    });
+    el.querySelectorAll('.convert-chip-remove').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const chip = this.closest('.convert-write-chip');
+            if (chip) {
+                const t = chip.dataset.type;
+                convertToSelections = convertToSelections.filter(x => x.type !== t);
+                renderConvertWritesList();
+            }
+        });
+    });
+}
+
+function initConvertTypeDropdown() {
+    // Use event delegation so it works regardless of when the convert tab is in the DOM
+    document.body.addEventListener('click', function(e) {
+        const addBtn = document.getElementById('convert-add-type-btn');
+        const dropdown = document.getElementById('convert-type-dropdown');
+        if (!addBtn || !dropdown) return;
+        // Click on "Add type to convert to" button -> toggle dropdown
+        if (e.target.id === 'convert-add-type-btn' || e.target.closest('#convert-add-type-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const open = dropdown.classList.toggle('open');
+            addBtn.setAttribute('aria-expanded', open);
+            dropdown.setAttribute('aria-hidden', !open);
+            return;
+        }
+        // Click on an option inside the dropdown -> add type
+        const option = e.target.closest('#convert-type-dropdown button[role="option"]');
+        if (option && dropdown.classList.contains('open')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const type = option.dataset.type;
+            if (type && !convertToSelections.some(s => s.type === type)) {
+                convertToSelections.push({
+                    type,
+                    label: CONVERT_TYPE_LABELS[type] || type,
+                    column: getNextDefaultConvertColumn()
+                });
+                renderConvertWritesList();
+            }
+            dropdown.classList.remove('open');
+            addBtn.setAttribute('aria-expanded', 'false');
+            dropdown.setAttribute('aria-hidden', 'true');
+            return;
+        }
+        // Click outside -> close dropdown
+        if (dropdown.classList.contains('open') && !dropdown.contains(e.target) && e.target !== addBtn) {
+            dropdown.classList.remove('open');
+            addBtn.setAttribute('aria-expanded', 'false');
+            dropdown.setAttribute('aria-hidden', 'true');
+        }
+    });
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initConvertTypeDropdown);
+} else {
+    initConvertTypeDropdown();
+}
+
+// Convert IDs
+async function convertIds() {
+    const sheetInfo = requireSheetConnection('convert-status');
+    if (!sheetInfo) return;
     
-    // Refresh sheet data before processing
     showStatus('convert-status', 'Refreshing sheet data...', 'info');
     const refreshed = await refreshSheetConnection();
     if (!refreshed) {
@@ -831,15 +961,28 @@ async function convertIds() {
     
     const idsText = document.getElementById('convert-ids').value;
     const fromType = document.getElementById('convert-from-type').value;
-    const toType = document.getElementById('convert-to-type').value;
     const columnIndex = parseInt(document.getElementById('convert-read-column').value);
-    const writeColumn = document.getElementById('convert-write-column').value;
-    
+    const toTypes = [];
+    const writeColumns = {};
+    const chips = document.querySelectorAll('#convert-writes-inline .convert-write-chip');
+    chips.forEach(chip => {
+        const type = chip.dataset.type;
+        const sel = chip.querySelector('select.convert-chip-col');
+        if (type && sel) {
+            toTypes.push(type);
+            writeColumns[type] = sel.value;
+        }
+    });
+    if (toTypes.length === 0) {
+        showStatus('convert-status', 'Select at least one type to convert to (click “Add type to convert to”).', 'error');
+        return;
+    }
     const ids = idsText.trim() ? idsText.split('\n').map(id => id.trim()).filter(id => id) : [];
     
     clearStatus('convert-status');
     clearResults('convert-results');
     showStatus('convert-status', 'Converting IDs...', 'info');
+    setOperationRunning('convert', true);
     
     try {
         const serviceAccountData = await getServiceAccountData();
@@ -849,9 +992,9 @@ async function convertIds() {
             sheet_name: sheetInfo.name,
             ids: ids.length > 0 ? ids : undefined,
             from_type: fromType,
-            to_type: toType,
-            column_index: columnIndex,
-            write_column: writeColumn
+            to_types: toTypes,
+            write_columns: writeColumns,
+            column_index: columnIndex
         };
         
         if (oauthState) {
@@ -862,29 +1005,27 @@ async function convertIds() {
         
         const result = await apiCall('/automation/convert-id', 'POST', requestData);
         
-        showStatus('convert-status', `Conversion completed and written to column ${writeColumn}`, 'success');
-        showResults('convert-results', result.results, formatConvertResults);
+        const colList = toTypes.map(t => `${t}→${writeColumns[t]}`).join(', ');
+        showStatus('convert-status', `Conversion completed; written to column(s): ${colList}`, 'success');
+        showResults('convert-results', result.results, (r) => formatConvertResults(r, toTypes));
     } catch (error) {
         showStatus('convert-status', `Error: ${error.message}`, 'error');
+    } finally {
+        setOperationRunning('convert', false);
     }
 }
 
-function formatConvertResults(results) {
+function formatConvertResults(results, toTypes) {
     if (!results || results.length === 0) return '<p>No results</p>';
-    
-    let html = '<table><thead><tr><th>Original ID</th><th>Converted ID</th><th>Status</th></tr></thead><tbody>';
-    
+    const types = Array.isArray(toTypes) && toTypes.length ? toTypes : ['SID'];
+    const headers = ['Original ID', ...types.map(t => t.replace('_', ' ')), 'Status'].join('</th><th>');
+    let html = `<table><thead><tr><th>${headers}</th></tr></thead><tbody>`;
     results.forEach(result => {
         const statusClass = result.success ? 'success' : 'error';
-        html += `
-            <tr class="result-item ${statusClass}">
-                <td>${result.id}</td>
-                <td>${result.converted_id || '-'}</td>
-                <td>${result.success ? 'Success' : result.error}</td>
-            </tr>
-        `;
+        const cells = types.map(t => result.converted_ids && result.converted_ids[t] != null ? result.converted_ids[t] : (result.converted_id != null && types.length === 1 ? result.converted_id : '-'));
+        const cellStr = cells.map(c => `<td>${c}</td>`).join('');
+        html += `<tr class="result-item ${statusClass}"><td>${result.id}</td>${cellStr}<td>${result.success ? 'Success' : (result.error || 'Error')}</td></tr>`;
     });
-    
     html += '</tbody></table>';
     return html;
 }

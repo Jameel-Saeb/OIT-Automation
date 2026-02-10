@@ -11,12 +11,39 @@ from datetime import datetime
 import time
 import platform
 
+
+class OperationAbortedException(Exception):
+    """Raised when the user aborts an operation mid-run"""
+    pass
+
+
 class AutomationService:
     def __init__(self, config, sheets_service):
         self.config = config
         self.sheets_service = sheets_service
         self.driver = None
         self.wait = None
+        self.abort_requested = False
+    
+    def abort(self):
+        """Signal to abort the current operation. Navigator will return to myaccount."""
+        self.abort_requested = True
+    
+    def _check_abort(self):
+        """If abort was requested, navigate back to myaccount and raise."""
+        if self.abort_requested:
+            self.abort_requested = False
+            self._navigate_to_myaccount()
+            raise OperationAbortedException("Operation aborted by user")
+    
+    def _navigate_to_myaccount(self):
+        """Navigate the browser back to the default myaccount person/search page."""
+        if self.driver and self._is_driver_alive():
+            try:
+                self.driver.get("https://myaccount.brown.edu/person/search")
+                print("↩️  Navigated back to myaccount")
+            except Exception as e:
+                print(f"⚠️  Could not navigate to myaccount: {str(e)[:100]}")
     
     def _is_driver_alive(self):
         """Check if the driver is still alive and responsive"""
@@ -947,142 +974,144 @@ class AutomationService:
         
         results = []
         
-        for user_id in ids:
-            result = {'id': user_id, 'success': False, 'error': None}
-            try:
-                # Search for user
-                search_button = self.driver.find_element(By.NAME, "search")
-                text_box = self.driver.find_element(By.NAME, "brown_login")
-                text_box.clear()
-                text_box.send_keys(user_id)
-                time.sleep(2)
-                search_button.click()
-                time.sleep(3)
-                
-                # Click View Overview
+        try:
+            for user_id in ids:
+                self._check_abort()
+                result = {'id': user_id, 'success': False, 'error': None}
                 try:
-                    vo = self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
-                    )
-                    vo.click()
-                except:
-                    result['error'] = "Could not find View Overview"
-                    results.append(result)
-                    continue
-                
-                time.sleep(2)
-                
-                # Extract Employment Source (for Banner-specific logic)
-                employment_source = ""
-                try:
-                    source_selectors = [
-                        (By.XPATH, "//label[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
-                        (By.XPATH, "//b[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
-                        (By.XPATH, "//*[contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                    # Search for user
+                    search_button = self.driver.find_element(By.NAME, "search")
+                    text_box = self.driver.find_element(By.NAME, "brown_login")
+                    text_box.clear()
+                    text_box.send_keys(user_id)
+                    time.sleep(2)
+                    search_button.click()
+                    time.sleep(3)
+                    
+                    # Click View Overview
+                    try:
+                        vo = self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
+                        )
+                        vo.click()
+                    except:
+                        result['error'] = "Could not find View Overview"
+                        results.append(result)
+                        continue
+                    
+                    time.sleep(2)
+                    
+                    # Extract Employment Source (for Banner-specific logic)
+                    employment_source = ""
+                    try:
+                        source_selectors = [
+                            (By.XPATH, "//label[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                            (By.XPATH, "//b[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                            (By.XPATH, "//*[contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"),
+                        ]
+                        for sel_type, sel_val in source_selectors:
+                            try:
+                                source_div = self.driver.find_element(sel_type, sel_val)
+                                employment_source = (source_div.text or "").strip()
+                                print(f"  📋 Employment Source: '{employment_source}'")
+                                break
+                            except:
+                                continue
+                    except Exception as e:
+                        print(f"  ⚠️  Could not extract Employment Source: {str(e)[:80]}")
+                    
+                    # Navigate to AdminID - Current
+                    button = self.driver.find_element(By.LINK_TEXT, "AdminID - Current")
+                    button.click()
+                    
+                    # Click New Privilege
+                    self.driver.find_element(By.LINK_TEXT, "New Privilege").click()
+                    time.sleep(2)
+                    
+                    # Select application
+                    select_element = Select(self.driver.find_element(By.NAME, "application_id"))
+                    select_element.select_by_visible_text(app_name)
+                    time.sleep(2)
+                    
+                    # Set Processing Status to "Complete"
+                    print(f"  🔧 Setting Processing Status to 'Complete'...")
+                    try:
+                        # Click the Processing Status dropdown
+                        status_dropdown = self.driver.find_element(By.XPATH, "//*[@id='status_id']")
+                        status_dropdown.click()
+                        print(f"  ✅ Clicked Processing Status dropdown")
+                        time.sleep(0.5)
+                        
+                        # Click the second option (Complete)
+                        complete_option = self.driver.find_element(By.XPATH, "//*[@id='status_id']/option[2]")
+                        complete_option.click()
+                        print(f"  ✅ Selected 'Complete' status")
+                        time.sleep(1)
+                    except Exception as e:
+                        print(f"  ⚠️  Could not set Processing Status: {str(e)[:100]}")
+                    
+                    # Fill in "Performed By" field with autocomplete
+                    print(f"  🔍 Looking for 'Performed By' field...")
+                    performed_by_filled = False
+                    performed_by_selectors = [
+                        (By.ID, "searchField"),  # The actual ID from the Brown MyAccount page
+                        (By.XPATH, "//*[@id='searchField']"),
+                        (By.NAME, "performed_by"),
+                        (By.NAME, "performedBy"),
+                        (By.NAME, "performed_by_id"),
+                        (By.ID, "performed_by"),
+                        (By.ID, "performedBy"),
+                        (By.XPATH, "//input[@placeholder='Performed By']"),
+                        (By.XPATH, "//label[contains(text(), 'Performed By')]/following-sibling::input"),
+                        (By.XPATH, "//label[contains(text(), 'Performed By')]/..//input"),
                     ]
-                    for sel_type, sel_val in source_selectors:
+                    
+                    performed_by_field = None
+                    for selector_type, selector_value in performed_by_selectors:
                         try:
-                            source_div = self.driver.find_element(sel_type, sel_val)
-                            employment_source = (source_div.text or "").strip()
-                            print(f"  📋 Employment Source: '{employment_source}'")
+                            performed_by_field = self.driver.find_element(selector_type, selector_value)
+                            print(f"  ✅ Found 'Performed By' field using selector: {selector_value}")
                             break
                         except:
                             continue
-                except Exception as e:
-                    print(f"  ⚠️  Could not extract Employment Source: {str(e)[:80]}")
-                
-                # Navigate to AdminID - Current
-                button = self.driver.find_element(By.LINK_TEXT, "AdminID - Current")
-                button.click()
-                
-                # Click New Privilege
-                self.driver.find_element(By.LINK_TEXT, "New Privilege").click()
-                time.sleep(2)
-                
-                # Select application
-                select_element = Select(self.driver.find_element(By.NAME, "application_id"))
-                select_element.select_by_visible_text(app_name)
-                time.sleep(2)
-                
-                # Set Processing Status to "Complete"
-                print(f"  🔧 Setting Processing Status to 'Complete'...")
-                try:
-                    # Click the Processing Status dropdown
-                    status_dropdown = self.driver.find_element(By.XPATH, "//*[@id='status_id']")
-                    status_dropdown.click()
-                    print(f"  ✅ Clicked Processing Status dropdown")
-                    time.sleep(0.5)
                     
-                    # Click the second option (Complete)
-                    complete_option = self.driver.find_element(By.XPATH, "//*[@id='status_id']/option[2]")
-                    complete_option.click()
-                    print(f"  ✅ Selected 'Complete' status")
-                    time.sleep(1)
-                except Exception as e:
-                    print(f"  ⚠️  Could not set Processing Status: {str(e)[:100]}")
-                
-                # Fill in "Performed By" field with autocomplete
-                print(f"  🔍 Looking for 'Performed By' field...")
-                performed_by_filled = False
-                performed_by_selectors = [
-                    (By.ID, "searchField"),  # The actual ID from the Brown MyAccount page
-                    (By.XPATH, "//*[@id='searchField']"),
-                    (By.NAME, "performed_by"),
-                    (By.NAME, "performedBy"),
-                    (By.NAME, "performed_by_id"),
-                    (By.ID, "performed_by"),
-                    (By.ID, "performedBy"),
-                    (By.XPATH, "//input[@placeholder='Performed By']"),
-                    (By.XPATH, "//label[contains(text(), 'Performed By')]/following-sibling::input"),
-                    (By.XPATH, "//label[contains(text(), 'Performed By')]/..//input"),
-                ]
-                
-                performed_by_field = None
-                for selector_type, selector_value in performed_by_selectors:
+                    if not performed_by_field:
+                        result['error'] = "⚠️ 'Performed By' field not found - stopping process"
+                        print(f"  ❌ 'Performed By' field not found - tried {len(performed_by_selectors)} selectors")
+                        results.append(result)
+                        # Don't close driver - let user stay logged in
+                        raise Exception("Performed By field not found. ChromeDriver session kept alive for debugging.")
+                    
+                    # Scroll the field into view before interacting with it
+                    # This is important for autocomplete dropdowns to appear correctly
+                    print(f"  📜 Scrolling 'Performed By' field into view...")
                     try:
-                        performed_by_field = self.driver.find_element(selector_type, selector_value)
-                        print(f"  ✅ Found 'Performed By' field using selector: {selector_value}")
-                        break
-                    except:
-                        continue
-                
-                if not performed_by_field:
-                    result['error'] = "⚠️ 'Performed By' field not found - stopping process"
-                    print(f"  ❌ 'Performed By' field not found - tried {len(performed_by_selectors)} selectors")
-                    results.append(result)
-                    # Don't close driver - let user stay logged in
-                    raise Exception("Performed By field not found. ChromeDriver session kept alive for debugging.")
-                
-                # Scroll the field into view before interacting with it
-                # This is important for autocomplete dropdowns to appear correctly
-                print(f"  📜 Scrolling 'Performed By' field into view...")
-                try:
-                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", performed_by_field)
-                    time.sleep(1)  # Wait for scroll to complete
-                    print(f"  ✅ Scrolled field into view")
-                except Exception as e:
-                    print(f"  ⚠️  Could not scroll field into view: {str(e)[:100]}")
-                
-                # Click the field first to focus it and activate autocomplete
-                try:
-                    performed_by_field.click()
-                    print(f"  👆 Clicked 'Performed By' field to focus it")
-                    time.sleep(0.5)
-                except Exception as e:
-                    print(f"  ⚠️  Could not click field: {str(e)[:100]}")
-                
-                # Type the name in the field
-                # Try normal send_keys first, fall back to JavaScript if it fails
-                try:
-                    performed_by_field.send_keys(performed_by_name)
-                    print(f"  ⌨️  Typed '{performed_by_name}' in Performed By field")
-                except Exception as e:
-                    print(f"  ⚠️  Normal typing failed: {str(e)[:100]}")
-                    print(f"  🔄 Trying JavaScript to set value and trigger events...")
+                        self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", performed_by_field)
+                        time.sleep(1)  # Wait for scroll to complete
+                        print(f"  ✅ Scrolled field into view")
+                    except Exception as e:
+                        print(f"  ⚠️  Could not scroll field into view: {str(e)[:100]}")
+                    
+                    # Click the field first to focus it and activate autocomplete
                     try:
-                        # Use JavaScript to set the value and trigger multiple events
-                        self.driver.execute_script("""
+                        performed_by_field.click()
+                        print(f"  👆 Clicked 'Performed By' field to focus it")
+                        time.sleep(0.5)
+                    except Exception as e:
+                        print(f"  ⚠️  Could not click field: {str(e)[:100]}")
+                    
+                    # Type the name in the field
+                    # Try normal send_keys first, fall back to JavaScript if it fails
+                    try:
+                        performed_by_field.send_keys(performed_by_name)
+                        print(f"  ⌨️  Typed '{performed_by_name}' in Performed By field")
+                    except Exception as e:
+                        print(f"  ⚠️  Normal typing failed: {str(e)[:100]}")
+                        print(f"  🔄 Trying JavaScript to set value and trigger events...")
+                        try:
+                            # Use JavaScript to set the value and trigger multiple events
+                            self.driver.execute_script("""
                             var element = arguments[0];
                             var value = arguments[1];
                             element.value = value;
@@ -1093,158 +1122,162 @@ class AutomationService:
                             element.dispatchEvent(new Event('keydown', { bubbles: true }));
                             element.dispatchEvent(new Event('keyup', { bubbles: true }));
                             element.dispatchEvent(new Event('change', { bubbles: true }));
-                        """, performed_by_field, performed_by_name)
-                        print(f"  ✅ Set value via JavaScript and triggered events: '{performed_by_name}'")
-                    except Exception as e2:
-                        result['error'] = f"⚠️ Could not type in 'Performed By' field: {str(e2)[:100]}"
-                        print(f"  ❌ JavaScript also failed: {str(e2)[:100]}")
-                        results.append(result)
-                        raise Exception(f"Could not type in Performed By field. ChromeDriver session kept alive for debugging.")
-                
-                # Wait 2 seconds for autocomplete suggestions to appear
-                print(f"  ⏱️  Waiting 2 seconds for autocomplete dropdown...")
-                time.sleep(2)
+                            """, performed_by_field, performed_by_name)
+                            print(f"  ✅ Set value via JavaScript and triggered events: '{performed_by_name}'")
+                        except Exception as e2:
+                            result['error'] = f"⚠️ Could not type in 'Performed By' field: {str(e2)[:100]}"
+                            print(f"  ❌ JavaScript also failed: {str(e2)[:100]}")
+                            results.append(result)
+                            raise Exception(f"Could not type in Performed By field. ChromeDriver session kept alive for debugging.")
+                    
+                    # Wait 2 seconds for autocomplete suggestions to appear
+                    print(f"  ⏱️  Waiting 2 seconds for autocomplete dropdown...")
+                    time.sleep(2)
 
-                # Try clicking the autocomplete suggestion using XPath
-                print(f"  🔍 Looking for autocomplete suggestion...")
-                autocomplete_clicked = False
-                
-                # Try the specific XPath: //span/div[1]
-                try:
-                    print(f"  🎯 Trying XPath: //span/div[1]...")
-                    first_suggestion = WebDriverWait(self.driver, 3).until(
-                        EC.element_to_be_clickable((By.XPATH, "//span/div[1]"))
-                    )
+                    # Try clicking the autocomplete suggestion using XPath
+                    print(f"  🔍 Looking for autocomplete suggestion...")
+                    autocomplete_clicked = False
                     
-                    # Use ActionChains for real mouse click
-                    actions = ActionChains(self.driver)
-                    actions.move_to_element(first_suggestion).click().perform()
-                    
-                    print(f"  ✅ Clicked autocomplete suggestion")
-                    autocomplete_clicked = True
-                    performed_by_filled = True
-                    
-                except Exception as e:
-                    print(f"  ⚠️  XPath click failed: {str(e)[:100]}")
-                
-                if not autocomplete_clicked:
-                    print(f"  🔍 Trying element-based clicking as fallback...")
-                    autocomplete_selectors = [
-                        # Try the exact visible dropdown structure first
-                        (By.XPATH, "//div[contains(text(), 'Jameel')]"),  # Specific to the visible name
-                        (By.XPATH, "//*[contains(@class, 'autocomplete')]//*[contains(text(), 'Jameel')]"),
-                        
-                        # Generic first item selectors
-                        (By.XPATH, "//ul/li[1]"),  # First li in any ul
-                        (By.XPATH, "//div[contains(@class, 'autocomplete')]//*[1]"),
-                        (By.XPATH, "//ul[contains(@class, 'autocomplete')]//li[1]"),
-                        (By.XPATH, "//div[contains(@class, 'suggestion')]//div[1]"),
-                        (By.XPATH, "//div[contains(@class, 'suggestion')][1]"),
-                        (By.XPATH, "//li[contains(@class, 'suggestion')][1]"),
-                        
-                        # Role-based selectors
-                        (By.XPATH, "//div[@role='option'][1]"),
-                        (By.XPATH, "//li[@role='option'][1]"),
-                        (By.XPATH, "//*[@role='option'][1]"),
-                        
-                        # Common UI library patterns
-                        (By.CSS_SELECTOR, ".autocomplete-suggestion:first-child"),
-                        (By.CSS_SELECTOR, ".ui-menu-item:first-child"),
-                        (By.XPATH, "//div[contains(@class, 'ui-menu-item')][1]"),
-                        (By.XPATH, "//li[contains(@class, 'ui-menu-item')][1]"),
-                        
-                        # ID-based (in case there's a results list)
-                        (By.XPATH, "//*[@id='searchFieldResults']//li[1]"),
-                        (By.XPATH, "//*[@id='searchFieldResults']//*[1]"),
-                        (By.XPATH, "//*[contains(@id, 'result')]//*[1]"),
-                        
-                        # Any visible div/li that contains the typed name
-                        (By.XPATH, f"//*[contains(text(), '{performed_by_name.split()[0]}')]"),
-                    ]
-                    
-                    for i, (selector_type, selector_value) in enumerate(autocomplete_selectors):
-                        try:
-                            print(f"     Trying selector {i+1}/{len(autocomplete_selectors)}: {selector_value[:80]}...")
-                            first_suggestion = WebDriverWait(self.driver, 2).until(
-                                EC.presence_of_element_located((selector_type, selector_value))
-                            )
-                            
-                            # Make sure element is visible
-                            if not first_suggestion.is_displayed():
-                                print(f"     ⚠️  Element found but not visible")
-                                continue
-                            
-                            # Use ActionChains for a real mouse click instead of element.click()
-                            print(f"     ✅ Found suggestion, performing real mouse click...")
-                            actions = ActionChains(self.driver)
-                            actions.move_to_element(first_suggestion).click().perform()
-                            
-                            print(f"  ✅ Clicked first autocomplete suggestion with real mouse click")
-                            autocomplete_clicked = True
-                            performed_by_filled = True
-                            break
-                        except Exception as e:
-                            print(f"     ❌ Failed: {str(e)[:60]}")
-                            continue
-                
-                if not autocomplete_clicked:
-                    result['error'] = f"⚠️ No autocomplete suggestions appeared for '{performed_by_name}' - stopping process"
-                    print(f"  ❌ No autocomplete suggestions found - tried {len(autocomplete_selectors)} selectors")
-                    results.append(result)
-                    # Don't close driver - let user stay logged in
-                    raise Exception(f"No autocomplete suggestions appeared for '{performed_by_name}'. ChromeDriver session kept alive for debugging.")
-                
-                time.sleep(1)  # Wait for selection to register
-                
-                # If Employment Source is Banner: set attn_type and attn_date
-                if employment_source and "Banner" in employment_source:
-                    print(f"  📋 Employment Source is Banner - setting attn_type and attn_date")
+                    # Try the specific XPath: //span/div[1]
                     try:
-                        attn_type_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_type']")
-                        attn_type_elem.click()
-                        time.sleep(0.5)
-                        attn_option = self.driver.find_element(By.XPATH, "//*[@id='attn_type']/option[3]")
-                        attn_option.click()
-                        print(f"  ✅ Selected attn_type option 3")
-                        time.sleep(0.5)
+                        print(f"  🎯 Trying XPath: //span/div[1]...")
+                        first_suggestion = WebDriverWait(self.driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, "//span/div[1]"))
+                        )
                         
-                        attn_date_str = self._get_next_attn_date()
-                        attn_date_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_date']")
-                        attn_date_elem.clear()
-                        attn_date_elem.send_keys(attn_date_str)
-                        print(f"  ✅ Set attn_date to {attn_date_str}")
-                        time.sleep(0.5)
+                        # Use ActionChains for real mouse click
+                        actions = ActionChains(self.driver)
+                        actions.move_to_element(first_suggestion).click().perform()
+                        
+                        print(f"  ✅ Clicked autocomplete suggestion")
+                        autocomplete_clicked = True
+                        performed_by_filled = True
+                        
                     except Exception as e:
-                        print(f"  ⚠️  Could not set attn_type/attn_date (Banner): {str(e)[:100]}")
-                else:
-                    print(f"  📋 Employment Source is not Banner - skipping attn_type/attn_date")
+                        print(f"  ⚠️  XPath click failed: {str(e)[:100]}")
+                    
+                    if not autocomplete_clicked:
+                        print(f"  🔍 Trying element-based clicking as fallback...")
+                        autocomplete_selectors = [
+                            # Try the exact visible dropdown structure first
+                            (By.XPATH, "//div[contains(text(), 'Jameel')]"),  # Specific to the visible name
+                            (By.XPATH, "//*[contains(@class, 'autocomplete')]//*[contains(text(), 'Jameel')]"),
+                            
+                            # Generic first item selectors
+                            (By.XPATH, "//ul/li[1]"),  # First li in any ul
+                            (By.XPATH, "//div[contains(@class, 'autocomplete')]//*[1]"),
+                            (By.XPATH, "//ul[contains(@class, 'autocomplete')]//li[1]"),
+                            (By.XPATH, "//div[contains(@class, 'suggestion')]//div[1]"),
+                            (By.XPATH, "//div[contains(@class, 'suggestion')][1]"),
+                            (By.XPATH, "//li[contains(@class, 'suggestion')][1]"),
+                            
+                            # Role-based selectors
+                            (By.XPATH, "//div[@role='option'][1]"),
+                            (By.XPATH, "//li[@role='option'][1]"),
+                            (By.XPATH, "//*[@role='option'][1]"),
+                            
+                            # Common UI library patterns
+                            (By.CSS_SELECTOR, ".autocomplete-suggestion:first-child"),
+                            (By.CSS_SELECTOR, ".ui-menu-item:first-child"),
+                            (By.XPATH, "//div[contains(@class, 'ui-menu-item')][1]"),
+                            (By.XPATH, "//li[contains(@class, 'ui-menu-item')][1]"),
+                            
+                            # ID-based (in case there's a results list)
+                            (By.XPATH, "//*[@id='searchFieldResults']//li[1]"),
+                            (By.XPATH, "//*[@id='searchFieldResults']//*[1]"),
+                            (By.XPATH, "//*[contains(@id, 'result')]//*[1]"),
+                            
+                            # Any visible div/li that contains the typed name
+                            (By.XPATH, f"//*[contains(text(), '{performed_by_name.split()[0]}')]"),
+                        ]
+                        
+                        for i, (selector_type, selector_value) in enumerate(autocomplete_selectors):
+                            try:
+                                print(f"     Trying selector {i+1}/{len(autocomplete_selectors)}: {selector_value[:80]}...")
+                                first_suggestion = WebDriverWait(self.driver, 2).until(
+                                    EC.presence_of_element_located((selector_type, selector_value))
+                                )
+                                
+                                # Make sure element is visible
+                                if not first_suggestion.is_displayed():
+                                    print(f"     ⚠️  Element found but not visible")
+                                    continue
+                                
+                                # Use ActionChains for a real mouse click instead of element.click()
+                                print(f"     ✅ Found suggestion, performing real mouse click...")
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(first_suggestion).click().perform()
+                                
+                                print(f"  ✅ Clicked first autocomplete suggestion with real mouse click")
+                                autocomplete_clicked = True
+                                performed_by_filled = True
+                                break
+                            except Exception as e:
+                                print(f"     ❌ Failed: {str(e)[:60]}")
+                                continue
+                    
+                    if not autocomplete_clicked:
+                        result['error'] = f"⚠️ No autocomplete suggestions appeared for '{performed_by_name}' - stopping process"
+                        print(f"  ❌ No autocomplete suggestions found - tried {len(autocomplete_selectors)} selectors")
+                        results.append(result)
+                        # Don't close driver - let user stay logged in
+                        raise Exception(f"No autocomplete suggestions appeared for '{performed_by_name}'. ChromeDriver session kept alive for debugging.")
+                    
+                    time.sleep(1)  # Wait for selection to register
+                    
+                    # If Employment Source is Banner: set attn_type and attn_date
+                    if employment_source and "Banner" in employment_source:
+                        print(f"  📋 Employment Source is Banner - setting attn_type and attn_date")
+                        try:
+                            attn_type_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_type']")
+                            attn_type_elem.click()
+                            time.sleep(0.5)
+                            attn_option = self.driver.find_element(By.XPATH, "//*[@id='attn_type']/option[3]")
+                            attn_option.click()
+                            print(f"  ✅ Selected attn_type option 3")
+                            time.sleep(0.5)
+                            
+                            attn_date_str = self._get_next_attn_date()
+                            attn_date_elem = self.driver.find_element(By.XPATH, "//*[@id='attn_date']")
+                            attn_date_elem.clear()
+                            attn_date_elem.send_keys(attn_date_str)
+                            print(f"  ✅ Set attn_date to {attn_date_str}")
+                            time.sleep(0.5)
+                        except Exception as e:
+                            print(f"  ⚠️  Could not set attn_type/attn_date (Banner): {str(e)[:100]}")
+                    else:
+                        print(f"  📋 Employment Source is not Banner - skipping attn_type/attn_date")
+                    
+                    # Add comment
+                    textarea = self.driver.find_element(By.NAME, "comments")
+                    existing_text = textarea.get_attribute("value") or ""
+                    new_text = (existing_text + " " + comment).strip() if comment else existing_text
+                    textarea.clear()
+                    textarea.send_keys(new_text)
+                    
+                    # Save
+                    submit_button = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, '//button[@type="submit" and text()="Save"]'))
+                    )
+                    submit_button.click()
+                    time.sleep(2)
+                    
+                    # Return to People page
+                    people_button = self.driver.find_element(
+                        By.XPATH,
+                        "//a[@class='selected' and contains(text(), 'People')]"
+                    )
+                    people_button.click()
+                    
+                    result['success'] = True
+                except OperationAbortedException:
+                    raise
+                except Exception as e:
+                    result['error'] = str(e)
                 
-                # Add comment
-                textarea = self.driver.find_element(By.NAME, "comments")
-                existing_text = textarea.get_attribute("value") or ""
-                new_text = (existing_text + " " + comment).strip() if comment else existing_text
-                textarea.clear()
-                textarea.send_keys(new_text)
-                
-                # Save
-                submit_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//button[@type="submit" and text()="Save"]'))
-                )
-                submit_button.click()
-                time.sleep(2)
-                
-                # Return to People page
-                people_button = self.driver.find_element(
-                    By.XPATH,
-                    "//a[@class='selected' and contains(text(), 'People')]"
-                )
-                people_button.click()
-                
-                result['success'] = True
-            except Exception as e:
-                result['error'] = str(e)
-            
-            results.append(result)
+                results.append(result)
+        except OperationAbortedException:
+            print("⛔ Add privileges aborted by user")
         
         return results
     
@@ -1255,112 +1288,118 @@ class AutomationService:
         
         results = []
         
-        for user_id in ids:
-            result = {'id': user_id, 'success': False, 'error': None}
-            try:
-                # Search for user
-                search_button = self.driver.find_element(By.NAME, "search")
-                text_box = self.driver.find_element(By.NAME, "brown_login")
-                text_box.clear()
-                text_box.send_keys(user_id)
-                time.sleep(3)
-                search_button.click()
-                time.sleep(3)
-                
-                # Click View Overview
+        try:
+            for user_id in ids:
+                self._check_abort()
+                result = {'id': user_id, 'success': False, 'error': None}
                 try:
-                    vo = self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
-                    )
-                    vo.click()
-                except:
-                    result['error'] = "Could not find View Overview"
-                    results.append(result)
-                    self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='selected' and contains(text(), 'People')]"
-                    ).click()
+                    # Search for user
+                    search_button = self.driver.find_element(By.NAME, "search")
+                    text_box = self.driver.find_element(By.NAME, "brown_login")
+                    text_box.clear()
+                    text_box.send_keys(user_id)
                     time.sleep(3)
-                    continue
-                
-                time.sleep(2)
-                
-                # Navigate to AdminID - Current
-                try:
-                    button = self.driver.find_element(By.LINK_TEXT, "AdminID - Current")
-                    button.click()
-                except:
-                    result['error'] = "Could not find AdminID - Current"
-                    results.append(result)
-                    self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='selected' and contains(text(), 'People')]"
-                    ).click()
+                    search_button.click()
                     time.sleep(3)
-                    continue
-                
-                # Find privilege in table
-                try:
-                    tbody = self.driver.find_element(By.TAG_NAME, 'tbody')
-                    rows = tbody.find_elements(By.TAG_NAME, 'tr')
-                except:
-                    result['error'] = "No privileges found"
-                    results.append(result)
-                    self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='selected' and contains(text(), 'People')]"
-                    ).click()
-                    time.sleep(3)
-                    continue
-                
-                privilege_found = False
-                for row in rows:
+                    
+                    # Click View Overview
                     try:
-                        span = row.find_element(By.XPATH, f'.//span[contains(text(), "{app_name}")]')
-                        if span:
-                            # Click Edit
-                            edit_link = row.find_element(By.XPATH, './/a[contains(text(), "Edit")]')
-                            edit_link.click()
-                            time.sleep(3)
-                            
-                            # Set expiration reason
-                            select_element = Select(self.driver.find_element(By.NAME, "exp_reason"))
-                            select_element.select_by_visible_text("Revoked")
-                            
-                            # Add comment
-                            textarea = self.driver.find_element(By.NAME, "comments")
-                            existing_text = textarea.get_attribute("value") or ""
-                            new_text = (existing_text + " " + comment).strip() if comment else existing_text
-                            textarea.clear()
-                            textarea.send_keys(new_text)
-                            
-                            # Save
-                            submit_button = WebDriverWait(self.driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, '//button[@type="submit" and text()="Save"]'))
-                            )
-                            submit_button.click()
-                            time.sleep(3)
-                            
-                            # Return to People page
-                            self.driver.find_element(By.LINK_TEXT, "People").click()
-                            time.sleep(3)
-                            
-                            result['success'] = True
-                            privilege_found = True
-                            break
+                        vo = self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
+                        )
+                        vo.click()
                     except:
+                        result['error'] = "Could not find View Overview"
+                        results.append(result)
+                        self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='selected' and contains(text(), 'People')]"
+                        ).click()
+                        time.sleep(3)
                         continue
+                    
+                    time.sleep(2)
+                    
+                    # Navigate to AdminID - Current
+                    try:
+                        button = self.driver.find_element(By.LINK_TEXT, "AdminID - Current")
+                        button.click()
+                    except:
+                        result['error'] = "Could not find AdminID - Current"
+                        results.append(result)
+                        self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='selected' and contains(text(), 'People')]"
+                        ).click()
+                        time.sleep(3)
+                        continue
+                    
+                    # Find privilege in table
+                    try:
+                        tbody = self.driver.find_element(By.TAG_NAME, 'tbody')
+                        rows = tbody.find_elements(By.TAG_NAME, 'tr')
+                    except:
+                        result['error'] = "No privileges found"
+                        results.append(result)
+                        self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='selected' and contains(text(), 'People')]"
+                        ).click()
+                        time.sleep(3)
+                        continue
+                    
+                    privilege_found = False
+                    for row in rows:
+                        try:
+                            span = row.find_element(By.XPATH, f'.//span[contains(text(), "{app_name}")]')
+                            if span:
+                                # Click Edit
+                                edit_link = row.find_element(By.XPATH, './/a[contains(text(), "Edit")]')
+                                edit_link.click()
+                                time.sleep(3)
+                                
+                                # Set expiration reason
+                                select_element = Select(self.driver.find_element(By.NAME, "exp_reason"))
+                                select_element.select_by_visible_text("Revoked")
+                                
+                                # Add comment
+                                textarea = self.driver.find_element(By.NAME, "comments")
+                                existing_text = textarea.get_attribute("value") or ""
+                                new_text = (existing_text + " " + comment).strip() if comment else existing_text
+                                textarea.clear()
+                                textarea.send_keys(new_text)
+                                
+                                # Save
+                                submit_button = WebDriverWait(self.driver, 10).until(
+                                    EC.element_to_be_clickable((By.XPATH, '//button[@type="submit" and text()="Save"]'))
+                                )
+                                submit_button.click()
+                                time.sleep(3)
+                                
+                                # Return to People page
+                                self.driver.find_element(By.LINK_TEXT, "People").click()
+                                time.sleep(3)
+                                
+                                result['success'] = True
+                                privilege_found = True
+                                break
+                        except:
+                            continue
+                    
+                    if not privilege_found:
+                        result['error'] = f"Privilege for '{app_name}' not found"
+                        self.driver.find_element(By.LINK_TEXT, "People").click()
+                        time.sleep(3)
                 
-                if not privilege_found:
-                    result['error'] = f"Privilege for '{app_name}' not found"
-                    self.driver.find_element(By.LINK_TEXT, "People").click()
-                    time.sleep(3)
+                except OperationAbortedException:
+                    raise
+                except Exception as e:
+                    result['error'] = str(e)
                 
-            except Exception as e:
-                result['error'] = str(e)
-            
-            results.append(result)
+                results.append(result)
+        except OperationAbortedException:
+            print("⛔ Revoke privileges aborted by user")
         
         return results
     
@@ -1378,184 +1417,208 @@ class AutomationService:
         
         results = []
         
-        for index, user_id in enumerate(ids):
-            result = {'id': user_id, 'employment_status': None, 'source': None, 'success': False, 'error': None}
-            try:
-                # Search for user based on ID type
-                search_button = self.driver.find_element(By.NAME, "search")
-                
-                if id_type == 'BID':
-                    text_box = self.driver.find_element(By.NAME, "brown_id")
-                elif id_type == 'SID':
-                    text_box = self.driver.find_element(By.NAME, "brown_login")
-                else:  # Name
-                    text_box = self.driver.find_element(By.NAME, "brown_login")
-                
-                text_box.clear()
-                text_box.send_keys(user_id)
-                time.sleep(2)
-                search_button.click()
-                time.sleep(3)
-                
-                # Click View Overview
+        try:
+            for index, user_id in enumerate(ids):
+                self._check_abort()
+                result = {'id': user_id, 'employment_status': None, 'source': None, 'success': False, 'error': None}
                 try:
-                    vo = self.driver.find_element(
-                        By.XPATH,
-                        "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
-                    )
-                    vo.click()
-                except:
-                    result['error'] = "User not found"
-                    results.append(result)
+                    # Search for user based on ID type
+                    search_button = self.driver.find_element(By.NAME, "search")
                     
-                    # Call callback immediately after result
-                    if on_result_callback:
-                        on_result_callback(index, result)
-                    
-                    continue
-                
-                time.sleep(2)
-                
-                # Get employment status and source
-                try:
                     if id_type == 'BID':
-                        employment_status_div = self.driver.find_element(
-                            By.XPATH,
-                            "//label[@class='col-xs-6' and contains(text(), 'Employment Status')]/following-sibling::div[@class='col-xs-6']"
-                        )
-                        source_div = self.driver.find_element(
-                            By.XPATH,
-                            "//label[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"
-                        )
-                    else:  # SID
-                        employment_status_div = self.driver.find_element(
-                            By.XPATH,
-                            "//b[@class='col-xs-6' and contains(text(), 'Employment Status:')]/following-sibling::div[@class='col-xs-6']"
-                        )
-                        source_div = self.driver.find_element(
-                            By.XPATH,
-                            "//b[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"
-                        )
+                        text_box = self.driver.find_element(By.NAME, "brown_id")
+                    elif id_type == 'SID':
+                        text_box = self.driver.find_element(By.NAME, "brown_login")
+                    else:  # Name
+                        text_box = self.driver.find_element(By.NAME, "brown_login")
                     
-                    result['employment_status'] = employment_status_div.text
-                    result['source'] = source_div.text
-                    result['success'] = True
+                    text_box.clear()
+                    text_box.send_keys(user_id)
+                    time.sleep(2)
+                    search_button.click()
+                    time.sleep(3)
+                    
+                    # Click View Overview
+                    try:
+                        vo = self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
+                        )
+                        vo.click()
+                    except:
+                        result['error'] = "User not found"
+                        results.append(result)
+                        
+                        # Call callback immediately after result
+                        if on_result_callback:
+                            on_result_callback(index, result)
+                        
+                        continue
+                    
+                    time.sleep(2)
+                    
+                    # Get employment status and source
+                    try:
+                        if id_type == 'BID':
+                            employment_status_div = self.driver.find_element(
+                                By.XPATH,
+                                "//label[@class='col-xs-6' and contains(text(), 'Employment Status')]/following-sibling::div[@class='col-xs-6']"
+                            )
+                            source_div = self.driver.find_element(
+                                By.XPATH,
+                                "//label[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"
+                            )
+                        else:  # SID
+                            employment_status_div = self.driver.find_element(
+                                By.XPATH,
+                                "//b[@class='col-xs-6' and contains(text(), 'Employment Status:')]/following-sibling::div[@class='col-xs-6']"
+                            )
+                            source_div = self.driver.find_element(
+                                By.XPATH,
+                                "//b[@class='col-xs-6' and contains(text(), 'Source')]/following-sibling::div[@class='col-xs-6']"
+                            )
+                        
+                        result['employment_status'] = employment_status_div.text
+                        result['source'] = source_div.text
+                        result['success'] = True
+                    except Exception as e:
+                        result['error'] = f"Could not extract data: {str(e)}"
+                    
+                    # Return to People page
+                    people_button = self.driver.find_element(
+                        By.XPATH,
+                        "//a[@class='selected' and contains(text(), 'People')]"
+                    )
+                    people_button.click()
+                    
+                except OperationAbortedException:
+                    raise
                 except Exception as e:
-                    result['error'] = f"Could not extract data: {str(e)}"
+                    result['error'] = str(e)
                 
-                # Return to People page
-                people_button = self.driver.find_element(
-                    By.XPATH,
-                    "//a[@class='selected' and contains(text(), 'People')]"
-                )
-                people_button.click()
+                results.append(result)
                 
-            except Exception as e:
-                result['error'] = str(e)
-            
-            results.append(result)
-            
-            # Call callback immediately after result
-            if on_result_callback:
-                on_result_callback(index, result)
+                # Call callback immediately after result
+                if on_result_callback:
+                    on_result_callback(index, result)
+        except OperationAbortedException:
+            print("⛔ Employment status check aborted by user")
         
         return results
     
-    def convert_ids(self, ids, from_type, to_type, on_result_callback=None):
+    def convert_ids(self, ids, from_type, to_types, write_columns, on_result_callback=None):
         """
-        Convert between ID types
+        Convert between ID types. Can output multiple types at once from one Overview view.
+        After View Overview, all target IDs are read from the Overview page once.
         
         Args:
             ids: List of IDs to convert
-            from_type: Source ID type ('NETID', 'BID', or 'SID')
-            to_type: Target ID type (currently only 'SID' supported)
+            from_type: Source ID type ('NETID', 'BID', 'BROWN_EMAIL', or 'SID')
+            to_types: List of target types e.g. ['SID', 'NETID']
+            write_columns: Dict mapping to_type -> column letter e.g. {'SID': 'B', 'NETID': 'C'}
             on_result_callback: Optional function to call after each result with (index, result)
         """
         if not self.driver:
             raise Exception("Not logged in. Please login first.")
         
-        if to_type != 'SID':
-            raise Exception("Currently only conversion to SID is supported")
+        valid_to_types = ('SID', 'NETID', 'BID', 'BROWN_EMAIL')
+        if not to_types:
+            raise Exception("At least one target type (to_types) is required")
+        for t in to_types:
+            if t not in valid_to_types:
+                raise Exception(f"to_type must be one of: {', '.join(valid_to_types)}")
         
         results = []
         
-        for index, user_id in enumerate(ids):
-            result = {'id': user_id, 'converted_id': None, 'success': False, 'error': None}
-            try:
-                # Search for user based on from_type
-                search_button = self.driver.find_element(By.NAME, "search")
-                
-                if from_type == 'NETID':
-                    # Remove @brown.edu if present
-                    netid = user_id.replace("@brown.edu", "")
-                    text_box = self.driver.find_element(By.NAME, "brown_netid")
-                    text_box.clear()
-                    text_box.send_keys(netid)
-                elif from_type == 'BID':
-                    text_box = self.driver.find_element(By.NAME, "brown_id")
-                    text_box.clear()
-                    text_box.send_keys(user_id)
-                else:
-                    result['error'] = f"Unsupported from_type: {from_type}"
-                    results.append(result)
-                    
-                    # Call callback immediately after result
-                    if on_result_callback:
-                        on_result_callback(index, result)
-                    
-                    continue
-                
-                time.sleep(2)
-                search_button.click()
-                time.sleep(2)
-                
-                # Click View Overview
+        try:
+            for index, user_id in enumerate(ids):
+                self._check_abort()
+                result = {'id': user_id, 'converted_ids': {}, 'success': False, 'error': None}
                 try:
-                    vo = self.driver.find_element(
+                    search_button = self.driver.find_element(By.NAME, "search")
+                    
+                    if from_type == 'NETID':
+                        netid = user_id.replace("@brown.edu", "")
+                        text_box = self.driver.find_element(By.NAME, "brown_netid")
+                        text_box.clear()
+                        text_box.send_keys(netid)
+                    elif from_type == 'BID':
+                        text_box = self.driver.find_element(By.NAME, "brown_id")
+                        text_box.clear()
+                        text_box.send_keys(user_id)
+                    elif from_type == 'BROWN_EMAIL':
+                        netid = user_id.split('@')[0].strip()
+                        text_box = self.driver.find_element(By.NAME, "brown_netid")
+                        text_box.clear()
+                        text_box.send_keys(netid)
+                    elif from_type == 'SID':
+                        text_box = self.driver.find_element(By.NAME, "brown_login")
+                        text_box.clear()
+                        text_box.send_keys(user_id)
+                    else:
+                        result['error'] = f"Unsupported from_type: {from_type}"
+                        results.append(result)
+                        if on_result_callback:
+                            on_result_callback(index, result)
+                        continue
+                    
+                    time.sleep(2)
+                    search_button.click()
+                    time.sleep(2)
+                    
+                    try:
+                        vo = self.driver.find_element(
+                            By.XPATH,
+                            "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
+                        )
+                        vo.click()
+                    except:
+                        result['error'] = "User not found"
+                        results.append(result)
+                        if on_result_callback:
+                            on_result_callback(index, result)
+                        continue
+                    
+                    time.sleep(2)
+                    
+                    # Read all ID types from Overview page once
+                    netid_elem = self.driver.find_element(
                         By.XPATH,
-                        "//a[@class='btn btn-default' and contains(text(), 'View Overview')]"
+                        "/html/body/div[1]/div/div[2]/div[3]/div[1]/div/div[7]/div[1]/div/div/div"
                     )
-                    vo.click()
-                except:
-                    result['error'] = "User not found"
-                    results.append(result)
+                    sid_elem = self.driver.find_element(
+                        By.XPATH,
+                        "/html/body/div[1]/div/div[2]/div[3]/div[1]/div/div[7]/div[2]/div/div"
+                    )
+                    bid_elem = self.driver.find_element(
+                        By.XPATH,
+                        "/html/body/div[1]/div/div[2]/div[3]/div[1]/div/div[1]/div[1]/div/div"
+                    )
+                    netid_val = netid_elem.text.strip()
+                    sid_val = sid_elem.text.strip()
+                    bid_val = bid_elem.text.strip()
+                    brown_email_val = f"{netid_val}@brown.edu"
+                    values = {'SID': sid_val, 'NETID': netid_val, 'BID': bid_val, 'BROWN_EMAIL': brown_email_val}
+                    for t in to_types:
+                        result['converted_ids'][t] = values.get(t, '')
+                    result['success'] = True
                     
-                    # Call callback immediately after result
-                    if on_result_callback:
-                        on_result_callback(index, result)
+                    people_button = self.driver.find_element(
+                        By.XPATH,
+                        "//a[@class='selected' and contains(text(), 'People')]"
+                    )
+                    people_button.click()
                     
-                    continue
+                except OperationAbortedException:
+                    raise
+                except Exception as e:
+                    result['error'] = str(e)
                 
-                time.sleep(2)
-                
-                # Navigate to E-Services
-                button = self.driver.find_element(By.LINK_TEXT, "E-Services")
-                button.click()
-                
-                # Get SID
-                sid = self.driver.find_element(
-                    By.XPATH,
-                    "//b[text()='Username:']/following-sibling::div"
-                ).text
-                
-                result['converted_id'] = sid
-                result['success'] = True
-                
-                # Return to People page
-                people_button = self.driver.find_element(
-                    By.XPATH,
-                    "//a[@class='selected' and contains(text(), 'People')]"
-                )
-                people_button.click()
-                
-            except Exception as e:
-                result['error'] = str(e)
-            
-            results.append(result)
-            
-            # Call callback immediately after result
-            if on_result_callback:
-                on_result_callback(index, result)
+                results.append(result)
+                if on_result_callback:
+                    on_result_callback(index, result)
+        except OperationAbortedException:
+            print("⛔ ID conversion aborted by user")
         
         return results
     

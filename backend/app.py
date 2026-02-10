@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify, session, redirect, url_for
+from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory
 from flask_cors import CORS
 import os
 import sys
 import json
 
 # Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(_BASE_DIR)
+FRONTEND_DIR = os.path.join(_BASE_DIR, 'frontend')
 
 from config import Config
 from backend.automation_service import AutomationService
@@ -520,6 +522,15 @@ def login():
         
         return jsonify({'success': False, 'error': error_msg}), 500
 
+@app.route('/api/automation/abort', methods=['POST'])
+def abort_automation():
+    """Abort the current automation task. Navigator returns to myaccount."""
+    try:
+        automation_service.abort()
+        return jsonify({'success': True, 'message': 'Abort requested. Task will stop after current item.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/automation/add', methods=['POST'])
 def add_privileges():
     """Add privileges to users - reads from Google Sheets column E (index 4)"""
@@ -583,7 +594,7 @@ def revoke_privileges():
         sheet_url = data.get('sheet_url')
         sheet_name = data.get('sheet_name')
         app_name = data.get('app_name', 'SLATE')
-        dp_number = data.get('dp_number', 'DP575922')
+        comment = data.get('comment', '')
         column_index = data.get('column_index', 5)  # Column F (index 5)
         if not sheet_url or not sheet_name:
             return jsonify({'success': False, 'error': 'Sheet URL and sheet name are required'}), 400
@@ -705,10 +716,10 @@ def convert_id():
         sheet_url = data.get('sheet_url')
         sheet_name = data.get('sheet_name')
         ids = data.get('ids', [])
-        from_type = data.get('from_type', 'NETID')  # NETID, BID, or SID
-        to_type = data.get('to_type', 'SID')
-        column_index = data.get('column_index', 0)  # Column A (index 0) for input IDs
-        write_column = data.get('write_column', 'B')  # Column for output
+        from_type = data.get('from_type', 'NETID')
+        to_types = data.get('to_types', ['SID'])
+        write_columns = data.get('write_columns', {'SID': 'B'})
+        column_index = data.get('column_index', 0)
         
         if not sheet_url or not sheet_name:
             return jsonify({'success': False, 'error': 'Sheet URL and sheet name are required'}), 400
@@ -732,32 +743,55 @@ def convert_id():
         if not ids:
             return jsonify({'success': False, 'error': 'No IDs provided or found'}), 400
         
-        print(f"📊 Starting ID conversion for {len(ids)} users ({from_type} → {to_type})")
-        print(f"� Will write results to column {write_column}")
+        if not to_types or not write_columns:
+            return jsonify({'success': False, 'error': 'At least one target type and column required'}), 400
+        print(f"📊 Starting ID conversion for {len(ids)} users ({from_type} → {', '.join(to_types)})")
+        
+        # Row 1 headers only for write columns (do not change the read column)
+        CONVERT_TYPE_HEADERS = {
+            'SID': 'Short ID',
+            'NETID': 'Net ID',
+            'BID': 'Brown ID',
+            'BROWN_EMAIL': 'Brown Email',
+        }
+        for t, col in write_columns.items():
+            if t not in to_types:
+                continue
+            title = CONVERT_TYPE_HEADERS.get(t, t)
+            try:
+                worksheet.update(f'{col}1', [[title]])
+                print(f"  📌 Header {col}1 = '{title}'")
+            except Exception as e:
+                print(f"  ⚠️  Failed to write header {col}1: {str(e)}")
         
         # Define callback to update sheet after each result
         def update_sheet_callback(index, result):
-            """Update Google Sheets immediately after converting each ID"""
-            row_number = index + 2  # +2 because: +1 for 0-index, +1 for header row
-            
+            row_number = index + 2
             if result.get('success'):
-                converted_id = result.get('converted_id', '')
-                print(f"  ✅ [{index+1}/{len(ids)}] {result.get('id')} → {converted_id}")
+                converted_ids = result.get('converted_ids', {})
+                print(f"  ✅ [{index+1}/{len(ids)}] {result.get('id')} → {converted_ids}")
+                for t, col in write_columns.items():
+                    if t not in to_types:
+                        continue
+                    val = converted_ids.get(t, '')
+                    try:
+                        cell = f'{col}{row_number}'
+                        worksheet.update(cell, [[val]])
+                        print(f"  📝 {cell}='{val}'")
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to update {cell}: {str(e)}")
             else:
-                converted_id = 'Not found'
-                error = result.get('error', 'Unknown error')
-                print(f"  ❌ [{index+1}/{len(ids)}] {result.get('id')}: {error}")
-            
-            # Update the specified column for this row immediately
-            try:
-                cell = f'{write_column}{row_number}'
-                worksheet.update(cell, [[converted_id]])
-                print(f"  📝 Updated sheet: {cell}='{converted_id}'")
-            except Exception as e:
-                print(f"  ⚠️  Failed to update sheet for row {row_number}: {str(e)}")
+                fill_val = 'Not found'
+                print(f"  ❌ [{index+1}/{len(ids)}] {result.get('id')}: {result.get('error', 'Unknown error')}")
+                for t, col in write_columns.items():
+                    if t not in to_types:
+                        continue
+                    try:
+                        worksheet.update(f'{col}{row_number}', [[fill_val]])
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to update sheet for row {row_number}: {str(e)}")
         
-        # Process all IDs with real-time sheet updates
-        results = automation_service.convert_ids(ids, from_type, to_type, on_result_callback=update_sheet_callback)
+        results = automation_service.convert_ids(ids, from_type, to_types, write_columns, on_result_callback=update_sheet_callback)
         
         print(f"✅ Completed ID conversion for {len(ids)} users")
         
@@ -850,6 +884,20 @@ def logout():
         return jsonify({'success': True, 'message': 'Logged out successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/')
+def serve_index():
+    """Serve frontend so the app can be used at http://localhost:5001/"""
+    if os.path.isdir(FRONTEND_DIR):
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+    return jsonify({'error': 'Frontend not found'}), 404
+
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve frontend static files - registered last so API routes take precedence."""
+    if os.path.isdir(FRONTEND_DIR) and path and not path.startswith('api'):
+        return send_from_directory(FRONTEND_DIR, path)
+    return jsonify({'error': 'Not found'}), 404
 
 if __name__ == '__main__':
     app.run(debug=config.FLASK_DEBUG, port=config.PORT, host='0.0.0.0')
