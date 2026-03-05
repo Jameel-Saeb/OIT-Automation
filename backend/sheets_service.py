@@ -121,9 +121,16 @@ class SheetsService:
         data = worksheet.get_all_values()
         if not data:
             return []
-        
-        # Transpose to get columns
-        columns = list(zip(*data))
+
+        # Build full rectangular matrix so columns are not truncated by short rows.
+        # zip(*data) cuts to the shortest row, which can drop values in later rows.
+        max_cols = max(len(row) for row in data)
+        columns = []
+        for col_idx in range(max_cols):
+            col_values = []
+            for row in data:
+                col_values.append(row[col_idx] if col_idx < len(row) else '')
+            columns.append(tuple(col_values))
         return columns
     
     def update_cell(self, worksheet, cell, value):
@@ -150,4 +157,54 @@ class SheetsService:
         # Format values as list of lists (each value in its own row)
         formatted_values = [[v] for v in values]
         worksheet.update(range_name, formatted_values)
+
+    def format_cell_backgrounds(self, worksheet, cells, rgb_color):
+        """Apply background color to a list of A1 cells.
+
+        Uses spreadsheet batch_update first, then falls back to per-cell worksheet.format
+        for compatibility across gspread/API variations.
+        """
+        if not cells:
+            return
+
+        try:
+            sheet_id = worksheet.id
+            requests = []
+            for cell in cells:
+                row, col = gspread.utils.a1_to_rowcol(cell)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startRowIndex': row - 1,
+                            'endRowIndex': row,
+                            'startColumnIndex': col - 1,
+                            'endColumnIndex': col,
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': rgb_color
+                            }
+                        },
+                        'fields': 'userEnteredFormat.backgroundColor'
+                    }
+                })
+
+            worksheet.spreadsheet.batch_update({'requests': requests})
+            return
+        except Exception as e:
+            print(f"⚠️  batch_update formatting failed, falling back to per-cell format: {e}")
+
+        cell_format = {'backgroundColor': rgb_color}
+        for cell in cells:
+            try:
+                worksheet.format(cell, cell_format)
+            except Exception as format_error:
+                print(f"⚠️  Could not format {cell}: {format_error}")
+
+    def color_cells_green(self, worksheet, cells):
+        self.format_cell_backgrounds(worksheet, cells, {'red': 0.80, 'green': 0.94, 'blue': 0.80})
+
+    def color_cells_red(self, worksheet, cells):
+        self.format_cell_backgrounds(worksheet, cells, {'red': 0.96, 'green': 0.80, 'blue': 0.80})
 

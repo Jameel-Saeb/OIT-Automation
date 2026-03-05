@@ -1043,10 +1043,12 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() {
         initConvertTypeDropdown();
         initStatusTypeDropdown();
+        initMoveConditionBuilder();
     });
 } else {
     initConvertTypeDropdown();
     initStatusTypeDropdown();
+    initMoveConditionBuilder();
 }
 
 // Convert IDs
@@ -1117,6 +1119,85 @@ async function convertIds() {
     }
 }
 
+async function runConvertValidation() {
+    const sheetInfo = requireSheetConnection('convert-status');
+    if (!sheetInfo) return;
+
+    showStatus('convert-status', 'Refreshing sheet data...', 'info');
+    const refreshed = await refreshSheetConnection();
+    if (!refreshed) {
+        showStatus('convert-status', 'Failed to refresh sheet connection', 'error');
+        return;
+    }
+
+    const checkColumn = (document.getElementById('convert-validate-check-column')?.value || 'X').trim().toUpperCase();
+    const dataStartRow = parseInt(document.getElementById('convert-validate-data-start-row')?.value || '2', 10);
+    const mappingInputs = [
+        { field: 'SID', elementId: 'convert-map-sid-column' },
+        { field: 'NETID', elementId: 'convert-map-netid-column' },
+        { field: 'BID', elementId: 'convert-map-bid-column' },
+        { field: 'FIRST_NAME', elementId: 'convert-map-firstname-column' },
+        { field: 'LAST_NAME', elementId: 'convert-map-lastname-column' }
+    ];
+
+    const searchMappings = mappingInputs
+        .map(item => {
+            const val = (document.getElementById(item.elementId)?.value || '').trim().toUpperCase();
+            return val ? { search_field: item.field, column: val } : null;
+        })
+        .filter(Boolean);
+
+    if (searchMappings.length === 0) {
+        showStatus('convert-status', 'Select at least one search mapping column.', 'error');
+        return;
+    }
+
+    if (!Number.isInteger(dataStartRow) || dataStartRow < 1) {
+        showStatus('convert-status', 'Data Start Row must be an integer >= 1.', 'error');
+        return;
+    }
+
+    const validateBtn = document.getElementById('convert-validate-start-btn');
+    if (validateBtn) validateBtn.disabled = true;
+
+    clearStatus('convert-status');
+    clearResults('convert-results');
+    showStatus('convert-status', 'Running validation check...', 'info');
+
+    try {
+        const serviceAccountData = await getServiceAccountData();
+        const oauthState = getOAuthState();
+
+        const requestData = {
+            sheet_url: sheetInfo.url,
+            sheet_name: sheetInfo.name,
+            search_mappings: searchMappings,
+            check_column: checkColumn,
+            data_start_row: dataStartRow
+        };
+
+        if (oauthState) {
+            requestData.oauth_state = oauthState;
+        } else {
+            Object.assign(requestData, serviceAccountData);
+        }
+
+        const result = await apiCall('/automation/convert-validation', 'POST', requestData);
+
+        showStatus(
+            'convert-status',
+            `${result.message} Colored ${result.green_source_cells} source + ${result.green_check_cells} check cells green, ${result.red_source_cells} source cells red.`,
+            'success'
+        );
+
+        showResults('convert-results', result.results, formatConvertValidationResults);
+    } catch (error) {
+        showStatus('convert-status', `Error: ${error.message}`, 'error');
+    } finally {
+        if (validateBtn) validateBtn.disabled = false;
+    }
+}
+
 function formatConvertResults(results, toTypes) {
     if (!results || results.length === 0) return '<p>No results</p>';
     const types = Array.isArray(toTypes) && toTypes.length ? toTypes : ['SID'];
@@ -1127,6 +1208,24 @@ function formatConvertResults(results, toTypes) {
         const cells = types.map(t => result.converted_ids && result.converted_ids[t] != null ? result.converted_ids[t] : (result.converted_id != null && types.length === 1 ? result.converted_id : '-'));
         const cellStr = cells.map(c => `<td>${c}</td>`).join('');
         html += `<tr class="result-item ${statusClass}"><td>${result.id}</td>${cellStr}<td>${result.success ? 'Success' : (result.error || 'Error')}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    return html;
+}
+
+function formatConvertValidationResults(results) {
+    if (!results || results.length === 0) return '<p>No results</p>';
+    let html = '<table><thead><tr><th>Search Values</th><th>Source Cells</th><th>Extracted Values</th><th>Matched Cells</th><th>Status</th></tr></thead><tbody>';
+    results.forEach(result => {
+        const matchedCells = (result.matched_check_cells || []).join(', ');
+        const extracted = (result.extracted_values || []).join(', ');
+        const searchValuesObj = result.search_values || {};
+        const searchValues = Object.entries(searchValuesObj).map(([k, v]) => `${k}: ${v}`).join(', ');
+        const sourceCells = (result.source_cells || []).join(', ');
+        const matched = Array.isArray(result.matched_check_cells) && result.matched_check_cells.length > 0;
+        const statusClass = matched ? 'success' : 'error';
+        const statusText = matched ? 'Match found' : (result.error ? result.error : 'No match');
+        html += `<tr class="result-item ${statusClass}"><td>${searchValues || '-'}</td><td>${sourceCells || '-'}</td><td>${extracted || '-'}</td><td>${matchedCells || '-'}</td><td>${statusText}</td></tr>`;
     });
     html += '</tbody></table>';
     return html;
@@ -1190,6 +1289,178 @@ async function compareLists() {
         showResults('compare-results', result, formatCompareResults);
     } catch (error) {
         showStatus('compare-status', `Error: ${error.message}`, 'error');
+    }
+}
+
+// Move and compact selected columns
+let moveConditions = [];
+
+const MOVE_CONDITION_OPERATORS = [
+    { value: 'equals', label: 'equals' },
+    { value: 'not_equals', label: 'not equals' },
+    { value: 'contains', label: 'contains' },
+    { value: 'not_contains', label: 'not contains' },
+    { value: 'starts_with', label: 'starts with' },
+    { value: 'ends_with', label: 'ends with' },
+    { value: 'is_empty', label: 'is empty' },
+    { value: 'is_not_empty', label: 'is not empty' }
+];
+
+function operatorNeedsValue(operator) {
+    return operator !== 'is_empty' && operator !== 'is_not_empty';
+}
+
+function initMoveConditionBuilder() {
+    if (!document.getElementById('move-conditions-container')) return;
+    if (moveConditions.length === 0) {
+        moveConditions = [
+            { column: 'C', operator: 'equals', value: '' },
+            { column: 'D', operator: 'equals', value: '' }
+        ];
+    }
+    renderMoveConditionRows();
+}
+
+function addMoveConditionRow() {
+    moveConditions.push({ column: '', operator: 'equals', value: '' });
+    renderMoveConditionRows();
+}
+
+function removeMoveConditionRow(index) {
+    if (moveConditions.length <= 1) {
+        moveConditions[0] = { column: '', operator: 'equals', value: '' };
+    } else {
+        moveConditions.splice(index, 1);
+    }
+    renderMoveConditionRows();
+}
+
+function updateMoveConditionRow(index, key, value) {
+    if (!moveConditions[index]) return;
+    moveConditions[index][key] = value;
+    renderMoveConditionRows();
+}
+
+function renderMoveConditionRows() {
+    const container = document.getElementById('move-conditions-container');
+    if (!container) return;
+
+    container.innerHTML = moveConditions.map((cond, index) => {
+        const options = MOVE_CONDITION_OPERATORS
+            .map(op => `<option value="${op.value}"${op.value === cond.operator ? ' selected' : ''}>${op.label}</option>`)
+            .join('');
+        const needsValue = operatorNeedsValue(cond.operator);
+
+        return `
+            <div style="display: grid; grid-template-columns: 90px 1fr 1fr auto; gap: 8px; margin-bottom: 8px; align-items: center;">
+                <input type="text" value="${cond.column || ''}" placeholder="Column"
+                    oninput="updateMoveConditionRow(${index}, 'column', this.value.toUpperCase().trim())">
+                <select onchange="updateMoveConditionRow(${index}, 'operator', this.value)">${options}</select>
+                <input type="text" value="${cond.value || ''}" placeholder="Value"
+                    ${needsValue ? '' : 'disabled'}
+                    oninput="updateMoveConditionRow(${index}, 'value', this.value)">
+                <button type="button" class="btn btn-danger" onclick="removeMoveConditionRow(${index})">×</button>
+            </div>
+        `;
+    }).join('');
+}
+
+async function moveAndShiftColumns() {
+    const sheetInfo = requireSheetConnection('move-status');
+    if (!sheetInfo) {
+        return;
+    }
+
+    showStatus('move-status', 'Refreshing sheet data...', 'info');
+    const refreshed = await refreshSheetConnection();
+    if (!refreshed) {
+        showStatus('move-status', 'Failed to refresh sheet connection', 'error');
+        return;
+    }
+
+    const sourceColumnsRaw = document.getElementById('move-source-columns').value || '';
+    const destinationColumnsRaw = document.getElementById('move-destination-columns').value || '';
+    const destinationStartRow = parseInt(document.getElementById('move-destination-start-row').value, 10);
+    const dataStartRow = parseInt(document.getElementById('move-data-start-row').value, 10);
+
+    const sourceColumns = sourceColumnsRaw.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+    const destinationColumns = destinationColumnsRaw.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+
+    if (sourceColumns.length === 0 || destinationColumns.length === 0) {
+        showStatus('move-status', 'Please provide source and destination columns.', 'error');
+        return;
+    }
+
+    if (sourceColumns.length !== destinationColumns.length) {
+        showStatus('move-status', 'Source and destination column counts must match.', 'error');
+        return;
+    }
+
+    if (!Number.isInteger(destinationStartRow) || destinationStartRow < 1 || !Number.isInteger(dataStartRow) || dataStartRow < 1) {
+        showStatus('move-status', 'Row numbers must be integers greater than or equal to 1.', 'error');
+        return;
+    }
+
+    const conditions = moveConditions
+        .map(c => ({
+            column: (c.column || '').trim().toUpperCase(),
+            operator: c.operator || 'equals',
+            value: c.value ?? ''
+        }))
+        .filter(c => c.column);
+
+    if (conditions.length === 0) {
+        showStatus('move-status', 'Please provide at least one condition with a column.', 'error');
+        return;
+    }
+
+    for (const c of conditions) {
+        if (operatorNeedsValue(c.operator) && String(c.value).trim() === '') {
+            showStatus('move-status', `Condition on column ${c.column} requires a value.`, 'error');
+            return;
+        }
+    }
+
+    clearStatus('move-status');
+    clearResults('move-results');
+    showStatus('move-status', 'Moving matching values and compacting source columns...', 'info');
+
+    try {
+        const serviceAccountData = await getServiceAccountData();
+        const oauthState = getOAuthState();
+        const requestData = {
+            sheet_url: sheetInfo.url,
+            sheet_name: sheetInfo.name,
+            source_columns: sourceColumns,
+            destination_columns: destinationColumns,
+            conditions,
+            destination_start_row: destinationStartRow,
+            data_start_row: dataStartRow
+        };
+
+        if (oauthState) {
+            requestData.oauth_state = oauthState;
+        } else {
+            Object.assign(requestData, serviceAccountData);
+        }
+
+        const result = await apiCall('/automation/move-and-shift-columns', 'POST', requestData);
+        showStatus('move-status', result.message || 'Move and shift completed.', 'success');
+
+        showResults('move-results', result, (r) => `
+            <table>
+                <thead>
+                    <tr><th>Metric</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Moved Rows</td><td>${r.moved_count ?? 0}</td></tr>
+                    <tr><td>Remaining Rows</td><td>${r.remaining_count ?? 0}</td></tr>
+                    <tr><td>Processed Rows</td><td>${r.processed_rows ?? 0}</td></tr>
+                </tbody>
+            </table>
+        `);
+    } catch (error) {
+        showStatus('move-status', `Error: ${error.message}`, 'error');
     }
 }
 

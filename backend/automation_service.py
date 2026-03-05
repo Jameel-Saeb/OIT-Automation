@@ -1742,6 +1742,166 @@ class AutomationService:
             print("⛔ ID conversion aborted by user")
         
         return results
+
+    def run_conversion_validation(self, lookup_items, on_result_callback=None):
+        """
+        Search MyAccount for each lookup value, iterate through result cards, and extract
+        the comparison value from each card.
+
+        lookup_items: list of dicts with {value, row, source_cell, source_column}
+        """
+        if not self.driver:
+            raise Exception("Not logged in. Please login first.")
+
+        results = []
+
+        def _find_search_input(field_key):
+            selectors = {
+                'SID': [
+                    (By.NAME, 'brown_login'),
+                    (By.XPATH, "//*[@name='brown_login']"),
+                ],
+                'NETID': [
+                    (By.NAME, 'brown_netid'),
+                    (By.XPATH, "//*[@name='brown_netid']"),
+                ],
+                'BID': [
+                    (By.NAME, 'brown_id'),
+                    (By.ID, 'brown_id'),
+                    (By.XPATH, "//*[@name='brown_id']"),
+                ],
+                'FIRST_NAME': [
+                    (By.XPATH, "//*[@id='first_name']"),
+                ],
+                'LAST_NAME': [
+                    (By.XPATH, "//*[@id='last_name']"),
+                ],
+            }
+
+            for selector_type, selector_value in selectors.get(field_key, []):
+                try:
+                    return self.driver.find_element(selector_type, selector_value)
+                except Exception:
+                    continue
+            return None
+
+        def _clear_search_inputs():
+            for field_key in ('SID', 'NETID', 'BID', 'FIRST_NAME', 'LAST_NAME'):
+                field_el = _find_search_input(field_key)
+                if field_el:
+                    try:
+                        field_el.clear()
+                    except Exception:
+                        pass
+
+        try:
+            for index, item in enumerate(lookup_items):
+                self._check_abort()
+
+                search_values = item.get('search_values', {}) or {}
+                result = {
+                    'row': item.get('row'),
+                    'search_values': search_values,
+                    'source_cells': item.get('source_cells', []) or [],
+                    'success': False,
+                    'error': None,
+                    'extracted_values': []
+                }
+
+                if not search_values:
+                    result['error'] = 'No search values provided for row'
+                    results.append(result)
+                    if on_result_callback:
+                        on_result_callback(index, result)
+                    continue
+
+                try:
+                    search_button = self.driver.find_element(By.NAME, "search")
+
+                    # Clear all supported fields to avoid stale values from previous row
+                    _clear_search_inputs()
+
+                    # Fill mapped fields for this row
+                    at_least_one_filled = False
+                    for field_key, field_value in search_values.items():
+                        value = str(field_value or '').strip()
+                        if not value:
+                            continue
+
+                        field_el = _find_search_input(field_key)
+                        if not field_el:
+                            continue
+
+                        send_value = value
+                        if field_key == 'NETID':
+                            send_value = value.replace('@brown.edu', '').strip()
+
+                        field_el.clear()
+                        field_el.send_keys(send_value)
+                        at_least_one_filled = True
+
+                    if not at_least_one_filled:
+                        result['error'] = 'No mapped search field could be filled on the page'
+                        results.append(result)
+                        if on_result_callback:
+                            on_result_callback(index, result)
+                        continue
+
+                    time.sleep(1)
+                    search_button.click()
+                    time.sleep(2)
+
+                    # Iterate /html/body/div[1]/div/div[2]/div[3]/div/div[2]/div[i]
+                    cards = self.driver.find_elements(
+                        By.XPATH,
+                        "/html/body/div[1]/div/div[2]/div[3]/div/div[2]/div"
+                    )
+
+                    extracted_values = []
+                    for i, card in enumerate(cards, start=1):
+                        extracted_val = ''
+                        try:
+                            # Relative form of: /html/body/div[1]/div/div[2]/div[3]/div/div[2]/div[i]/div[1]/div[2]/div[1]
+                            extracted_el = card.find_element(By.XPATH, "./div[1]/div[2]/div[1]")
+                            extracted_val = (extracted_el.text or '').strip()
+                        except Exception:
+                            try:
+                                extracted_el = self.driver.find_element(
+                                    By.XPATH,
+                                    f"/html/body/div[1]/div/div[2]/div[3]/div/div[2]/div[{i}]/div[1]/div[2]/div[1]"
+                                )
+                                extracted_val = (extracted_el.text or '').strip()
+                            except Exception:
+                                extracted_val = ''
+
+                        if extracted_val:
+                            extracted_values.append(extracted_val)
+
+                    result['extracted_values'] = extracted_values
+                    result['success'] = True
+
+                except OperationAbortedException:
+                    raise
+                except Exception as e:
+                    result['error'] = str(e)
+
+                results.append(result)
+                if on_result_callback:
+                    on_result_callback(index, result)
+
+                # Reset page inputs so no values remain after each iteration.
+                _clear_search_inputs()
+
+        except OperationAbortedException:
+            print("⛔ Conversion validation aborted by user")
+
+        # Final reset to leave MyAccount clean after run.
+        try:
+            _clear_search_inputs()
+        except Exception:
+            pass
+
+        return results
     
     def logout(self):
         """Close browser and cleanup"""

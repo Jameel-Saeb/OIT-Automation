@@ -42,8 +42,8 @@
             <button class="tab-button" onclick="showTab('add', this)">Add Privileges</button>
             <button class="tab-button" onclick="showTab('revoke', this)">Revoke Privileges</button>
             <button class="tab-button" onclick="showTab('status', this)">Statuses</button>
-            <button class="tab-button" onclick="showTab('convert', this)">ID Conversion</button>
-            <button class="tab-button" onclick="showTab('compare', this)">Compare Lists</button>
+            <button class="tab-button" onclick="showTab('convert', this)">Coversions and Validations</button>
+            <button class="tab-button" onclick="showTab('compare', this)">Sheet Manipulation</button>
         </div>
 
         <!-- Connection Tab -->
@@ -200,10 +200,10 @@
             </div>
         </div>
 
-        <!-- ID Conversion Tab -->
+        <!-- Coversions and Validations Tab -->
         <div id="convert" class="tab-content">
             <div class="card">
-                <h2>Convert IDs</h2>
+            <h2>Coversions and Validations</h2>
                 <p class="convert-sentence" id="convert-sentence">
                     Reads from column <select id="convert-read-column" class="column-select convert-inline-select">
                         <option value="0" selected>A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option><option value="4">E</option><option value="5">F</option><option value="6">G</option><option value="7">H</option><option value="8">I</option><option value="9">J</option><option value="10">K</option><option value="11">L</option><option value="12">M</option><option value="13">N</option><option value="14">O</option><option value="15">P</option><option value="16">Q</option><option value="17">R</option><option value="18">S</option><option value="19">T</option><option value="20">U</option><option value="21">V</option><option value="22">W</option><option value="23">X</option><option value="24">Y</option><option value="25">Z</option>
@@ -237,6 +237,54 @@
                 </div>
                 <button onclick="convertIds()" class="btn btn-primary" id="convert-start-btn">Convert IDs</button>
                 <button onclick="abortAutomation('convert')" class="btn btn-danger" id="convert-abort-btn" disabled style="margin-left: 10px;" title="Shows when operation is running">Abort</button>
+
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #ddd;">
+                <h3 style="margin-bottom: 12px; color: #333;">Validation Check</h3>
+                <p style="margin-bottom: 12px; color: #555;">
+                    Reads search values from one or more source columns, searches MyAccount, extracts values from results, and checks if they exist in a chosen sheet column.
+                </p>
+                <div class="form-group">
+                    <label>Map source columns to MyAccount search fields:</label>
+                    <div style="display: grid; grid-template-columns: minmax(220px, 1fr) 120px; gap: 8px; align-items: center;">
+                        <label for="convert-map-sid-column" style="margin: 0;">Short ID (SID)</label>
+                        <select id="convert-map-sid-column" class="column-select">
+                            <option value="">--</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                        </select>
+
+                        <label for="convert-map-netid-column" style="margin: 0;">Net ID</label>
+                        <select id="convert-map-netid-column" class="column-select">
+                            <option value="">--</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                        </select>
+
+                        <label for="convert-map-bid-column" style="margin: 0;">Brown ID (BID)</label>
+                        <select id="convert-map-bid-column" class="column-select">
+                            <option value="">--</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                        </select>
+
+                        <label for="convert-map-firstname-column" style="margin: 0;">First Name</label>
+                        <select id="convert-map-firstname-column" class="column-select">
+                            <option value="">--</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                        </select>
+
+                        <label for="convert-map-lastname-column" style="margin: 0;">Last Name</label>
+                        <select id="convert-map-lastname-column" class="column-select">
+                            <option value="">--</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>
+                        </select>
+                    </div>
+                    <small style="color: #666; display: block; margin-top: 6px;">Choose one or more mappings. Each non-empty mapped column will be used in the MyAccount search for that row.</small>
+                </div>
+                <div class="form-group">
+                    <label for="convert-validate-check-column">Check Against Column (X):</label>
+                    <select id="convert-validate-check-column" class="column-select">
+                        <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option><option value="F">F</option><option value="G">G</option><option value="H">H</option><option value="I">I</option><option value="J">J</option><option value="K">K</option><option value="L">L</option><option value="M">M</option><option value="N">N</option><option value="O">O</option><option value="P">P</option><option value="Q">Q</option><option value="R">R</option><option value="S">S</option><option value="T">T</option><option value="U">U</option><option value="V">V</option><option value="W">W</option><option value="X" selected>X</option><option value="Y">Y</option><option value="Z">Z</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="convert-validate-data-start-row">Data Start Row:</label>
+                    <input type="number" id="convert-validate-data-start-row" value="2" min="1">
+                    <small style="color: #666; display: block; margin-top: 4px;">Use 2 if row 1 is header, or 1 if your data starts at row 1.</small>
+                </div>
+                <button onclick="runConvertValidation()" class="btn btn-primary" id="convert-validate-start-btn">Run Validation Check</button>
                 <div id="convert-status" class="status-message"></div>
                 <div id="convert-results" class="results"></div>
             </div>
@@ -269,6 +317,44 @@
                 <button onclick="compareLists()" class="btn btn-primary">Compare Lists</button>
                 <div id="compare-status" class="status-message"></div>
                 <div id="compare-results" class="results"></div>
+            </div>
+
+            <div class="card">
+                <h2>Move & Shift Columns</h2>
+                <p>Move selected source columns to destination columns when conditions match, then compact only the selected source columns upward.</p>
+
+                <div class="form-group">
+                    <label for="move-source-columns">Source Columns (comma-separated):</label>
+                    <input type="text" id="move-source-columns" placeholder="A,C,D" value="A,C,D">
+                </div>
+
+                <div class="form-group">
+                    <label>Conditions (all must match):</label>
+                    <div id="move-conditions-container"></div>
+                    <button type="button" class="btn btn-secondary" onclick="addMoveConditionRow()" style="margin-top: 10px;">Add Condition</button>
+                    <small style="color: #666; display: block; margin-top: 8px;">
+                        Operators: equals, not equals, contains, not contains, starts with, ends with, is empty, is not empty
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label for="move-destination-columns">Destination Columns (comma-separated):</label>
+                    <input type="text" id="move-destination-columns" placeholder="E,H,K" value="E,H,K">
+                </div>
+
+                <div class="form-group">
+                    <label for="move-destination-start-row">Destination Start Row (j):</label>
+                    <input type="number" id="move-destination-start-row" value="2" min="1">
+                </div>
+
+                <div class="form-group">
+                    <label for="move-data-start-row">Source Data Start Row:</label>
+                    <input type="number" id="move-data-start-row" value="2" min="1">
+                </div>
+
+                <button onclick="moveAndShiftColumns()" class="btn btn-primary">Move and Shift</button>
+                <div id="move-status" class="status-message"></div>
+                <div id="move-results" class="results"></div>
             </div>
         </div>
 

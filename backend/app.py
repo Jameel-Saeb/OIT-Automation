@@ -3,6 +3,7 @@ from flask_cors import CORS
 import os
 import sys
 import json
+import re
 
 # Add parent directory to path for imports
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -799,6 +800,248 @@ def convert_id():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/automation/convert-validation', methods=['POST'])
+def convert_validation():
+    """Validate MyAccount search results against a selected sheet column and color cells."""
+    try:
+        data = request.json or {}
+        sheet_url = data.get('sheet_url')
+        sheet_name = data.get('sheet_name')
+        search_mappings = data.get('search_mappings', [])
+        check_column = str(data.get('check_column', 'X')).strip().upper()
+        data_start_row = int(data.get('data_start_row', 2))
+
+        if not sheet_url or not sheet_name:
+            return jsonify({'success': False, 'error': 'Sheet URL and sheet name are required'}), 400
+
+        if not isinstance(search_mappings, list):
+            return jsonify({'success': False, 'error': 'search_mappings must be a list'}), 400
+
+        normalized_mappings = []
+        for item in search_mappings:
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get('search_field', '')).strip().upper()
+            col = str(item.get('column', '')).strip().upper()
+            if not field or not col:
+                continue
+            normalized_mappings.append({'search_field': field, 'column': col})
+
+        if not normalized_mappings:
+            return jsonify({'success': False, 'error': 'At least one search mapping is required'}), 400
+
+        if not check_column:
+            return jsonify({'success': False, 'error': 'Check column is required'}), 400
+
+        if data_start_row < 1:
+            return jsonify({'success': False, 'error': 'data_start_row must be >= 1'}), 400
+
+        try:
+            authenticate_sheets_service(data)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+        worksheet = sheets_service.connect(sheet_url, sheet_name)
+        columns = sheets_service.get_columns(worksheet)
+
+        def col_letter_to_index(letter):
+            idx = 0
+            for ch in letter:
+                if ch < 'A' or ch > 'Z':
+                    raise ValueError(f'Invalid column letter: {letter}')
+                idx = idx * 26 + (ord(ch) - ord('A') + 1)
+            return idx - 1
+
+        def _clean(v):
+            text = str(v or '')
+            text = text.replace('\u00a0', ' ').replace('\u200b', '')
+            text = ' '.join(text.split()).strip().lower()
+            return text
+
+        def comparison_keys(v):
+            base = _clean(v)
+            if not base:
+                return set()
+
+            keys = {base, base.replace(' ', '')}
+
+            alnum_only = re.sub(r'[^a-z0-9]', '', base)
+            if alnum_only:
+                keys.add(alnum_only)
+
+            if '@' in base:
+                local_part = base.split('@')[0].strip()
+                if local_part:
+                    keys.add(local_part)
+                    keys.add(re.sub(r'[^a-z0-9]', '', local_part))
+
+            if ':' in base:
+                after_colon = base.split(':', 1)[1].strip()
+                if after_colon:
+                    keys.add(after_colon)
+                    keys.add(after_colon.replace(' ', ''))
+                    keys.add(re.sub(r'[^a-z0-9]', '', after_colon))
+
+            numeric = base.replace(',', '')
+            if re.fullmatch(r'\d+\.0+', numeric):
+                keys.add(numeric.split('.', 1)[0])
+
+            compact = base.replace(' ', '').replace('_', '').replace('-', '')
+            if compact:
+                keys.add(compact)
+
+            return {k for k in keys if k}
+
+        try:
+            mapping_indices = [
+                {
+                    'search_field': m['search_field'],
+                    'column': m['column'],
+                    'index': col_letter_to_index(m['column'])
+                }
+                for m in normalized_mappings
+            ]
+            check_index = col_letter_to_index(check_column)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+        for m in mapping_indices:
+            if m['index'] >= len(columns):
+                return jsonify({'success': False, 'error': f"Source column {m['column']} not found in worksheet"}), 400
+        if check_index >= len(columns):
+            return jsonify({'success': False, 'error': f'Check column {check_column} not found in worksheet'}), 400
+
+        lookup_items = []
+        max_rows = max((len(columns[m['index']]) for m in mapping_indices), default=0)
+
+        for row_number in range(data_start_row, max_rows + 1):
+            search_values = {}
+            source_cells = []
+            for m in mapping_indices:
+                col_values = columns[m['index']]
+                cell_value = str(col_values[row_number - 1]).strip() if (row_number - 1) < len(col_values) else ''
+                if cell_value:
+                    search_values[m['search_field']] = cell_value
+                    source_cells.append(f"{m['column']}{row_number}")
+
+            if not search_values:
+                continue
+
+            lookup_items.append({
+                'row': row_number,
+                'search_values': search_values,
+                'source_cells': source_cells
+            })
+
+        if not lookup_items:
+            return jsonify({'success': False, 'error': 'No values found in selected source columns'}), 400
+
+        check_values = columns[check_index]
+
+        check_key_to_cells = {}
+        check_cell_to_value = {}
+        for row_number in range(data_start_row, len(check_values) + 1):
+            idx = row_number - 1
+            value = str(check_values[idx]).strip() if idx < len(check_values) else ''
+            if not value:
+                continue
+            cell = f'{check_column}{row_number}'
+            check_cell_to_value[cell] = value
+            for key in comparison_keys(value):
+                if key not in check_key_to_cells:
+                    check_key_to_cells[key] = set()
+                check_key_to_cells[key].add(cell)
+
+        green_source_cells = set()
+        red_source_cells = set()
+        green_check_cells = set()
+
+        def process_validation_result(item_result):
+            source_cells = item_result.get('source_cells', []) or []
+            extracted_values = item_result.get('extracted_values', []) or []
+            matched_check_cells = set()
+            matched_values = []
+
+            for extracted in extracted_values:
+                extracted_keys = comparison_keys(extracted)
+                extracted_match_cells = set()
+                for key in extracted_keys:
+                    extracted_match_cells.update(check_key_to_cells.get(key, set()))
+                if extracted_match_cells:
+                    matched_values.append(extracted)
+                    matched_check_cells.update(extracted_match_cells)
+
+            item_result['match_scope'] = 'column-wide'
+            item_result['row_check_value'] = ''
+            item_result['row_check_keys'] = []
+            item_result['extracted_keys'] = {
+                str(extracted): sorted(list(comparison_keys(extracted)))
+                for extracted in extracted_values
+            }
+            item_result['matched_check_values'] = [
+                check_cell_to_value[cell]
+                for cell in sorted(list(matched_check_cells))
+                if cell in check_cell_to_value
+            ]
+
+            item_result['matched_values'] = matched_values
+            item_result['matched_check_cells'] = sorted(list(matched_check_cells))
+
+            if source_cells:
+                if item_result.get('success') and matched_check_cells:
+                    green_source_cells.update(source_cells)
+                    green_check_cells.update(matched_check_cells)
+
+                    # Realtime green updates per iteration
+                    try:
+                        sheets_service.color_cells_green(worksheet, sorted(list(set(source_cells))))
+                        sheets_service.color_cells_green(worksheet, sorted(list(matched_check_cells)))
+                    except Exception as e:
+                        print(f"⚠️  Realtime green color update failed: {e}")
+                else:
+                    red_source_cells.update(source_cells)
+
+                    # Realtime red updates per iteration
+                    try:
+                        sheets_service.color_cells_red(worksheet, sorted(list(set(source_cells))))
+                    except Exception as e:
+                        print(f"⚠️  Realtime red color update failed: {e}")
+
+        def on_validation_result(index, result):
+            try:
+                process_validation_result(result)
+            except Exception as e:
+                print(f"⚠️  Callback processing failed for index {index}: {e}")
+
+        validation_results = automation_service.run_conversion_validation(
+            lookup_items,
+            on_result_callback=on_validation_result
+        )
+
+        # Ensure all results are processed even if callback missed any.
+        for item_result in validation_results:
+            if 'matched_check_cells' not in item_result:
+                process_validation_result(item_result)
+
+        red_source_cells = red_source_cells - green_source_cells
+
+        matched_count = sum(1 for r in validation_results if r.get('matched_check_cells'))
+
+        return jsonify({
+            'success': True,
+            'results': validation_results,
+            'processed': len(validation_results),
+            'matched': matched_count,
+            'unmatched': len(validation_results) - matched_count,
+            'green_source_cells': len(green_source_cells),
+            'green_check_cells': len(green_check_cells),
+            'red_source_cells': len(red_source_cells),
+            'data_start_row': data_start_row,
+            'message': f'Validation complete: {matched_count} matched, {len(validation_results) - matched_count} unmatched.'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/automation/compare-lists', methods=['POST'])
 def compare_lists():
     """Compare two lists to find who to add and remove"""
@@ -869,6 +1112,188 @@ def compare_lists():
             'to_remove_count': len(to_remove),
             'message': f'Results written to columns {to_add_column} and {to_remove_column}'
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/automation/move-and-shift-columns', methods=['POST'])
+def move_and_shift_columns():
+    """Move selected column values to destination columns when conditions match, then compact source columns upward."""
+    try:
+        data = request.json or {}
+        sheet_url = data.get('sheet_url')
+        sheet_name = data.get('sheet_name')
+        source_columns = data.get('source_columns', [])
+        destination_columns = data.get('destination_columns', [])
+        conditions = data.get('conditions', [])
+        destination_start_row = int(data.get('destination_start_row', 2))
+        data_start_row = int(data.get('data_start_row', 2))
+
+        if not sheet_url or not sheet_name:
+            return jsonify({'success': False, 'error': 'Sheet URL and sheet name are required'}), 400
+
+        if not source_columns or not destination_columns:
+            return jsonify({'success': False, 'error': 'Source and destination columns are required'}), 400
+
+        if len(source_columns) != len(destination_columns):
+            return jsonify({'success': False, 'error': 'Source and destination columns must have the same count'}), 400
+
+        if destination_start_row < 1 or data_start_row < 1:
+            return jsonify({'success': False, 'error': 'Row numbers must be >= 1'}), 400
+
+        normalized_source_columns = [str(c).strip().upper() for c in source_columns if str(c).strip()]
+        normalized_destination_columns = [str(c).strip().upper() for c in destination_columns if str(c).strip()]
+
+        if len(normalized_source_columns) != len(source_columns) or len(normalized_destination_columns) != len(destination_columns):
+            return jsonify({'success': False, 'error': 'Columns cannot be empty'}), 400
+
+        def column_letter_to_index(letter):
+            idx = 0
+            for ch in letter:
+                if not ('A' <= ch <= 'Z'):
+                    raise ValueError(f'Invalid column letter: {letter}')
+                idx = idx * 26 + (ord(ch) - ord('A') + 1)
+            return idx
+
+        supported_operators = {
+            'equals',
+            'not_equals',
+            'contains',
+            'not_contains',
+            'starts_with',
+            'ends_with',
+            'is_empty',
+            'is_not_empty',
+        }
+
+        normalized_conditions = []
+        for cond in conditions:
+            col = str(cond.get('column', '')).strip().upper()
+            op = str(cond.get('operator', 'equals')).strip().lower()
+            val = str(cond.get('value', '')).strip()
+
+            if not col:
+                continue
+
+            if op not in supported_operators:
+                return jsonify({'success': False, 'error': f'Unsupported operator: {op}'}), 400
+
+            if op not in {'is_empty', 'is_not_empty'} and val == '':
+                return jsonify({'success': False, 'error': f'Condition value is required for operator {op} (column {col})'}), 400
+
+            normalized_conditions.append({'column': col, 'operator': op, 'value': val})
+
+        if not normalized_conditions:
+            return jsonify({'success': False, 'error': 'At least one condition is required'}), 400
+
+        try:
+            authenticate_sheets_service(data)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+        worksheet = sheets_service.connect(sheet_url, sheet_name)
+        rows = worksheet.get_all_values()
+
+        source_idx = [column_letter_to_index(c) - 1 for c in normalized_source_columns]
+        condition_idx = [column_letter_to_index(c['column']) - 1 for c in normalized_conditions]
+
+        last_relevant_row = data_start_row - 1
+        for row_number, row in enumerate(rows, start=1):
+            if row_number < data_start_row:
+                continue
+            relevant_columns = source_idx + condition_idx
+            for idx in relevant_columns:
+                if idx < len(row) and str(row[idx]).strip() != '':
+                    last_relevant_row = row_number
+                    break
+
+        if last_relevant_row < data_start_row:
+            return jsonify({
+                'success': True,
+                'moved_count': 0,
+                'message': 'No source data found in selected columns.'
+            })
+
+        moved_records = []
+        remaining_records = []
+
+        for row_number in range(data_start_row, last_relevant_row + 1):
+            row = rows[row_number - 1] if row_number - 1 < len(rows) else []
+
+            src_values = []
+            for idx in source_idx:
+                src_values.append(str(row[idx]).strip() if idx < len(row) else '')
+
+            has_source_data = any(v != '' for v in src_values)
+
+            def matches_condition(current_val, condition):
+                op = condition['operator']
+                expected = condition['value']
+
+                if op == 'equals':
+                    return current_val == expected
+                if op == 'not_equals':
+                    return current_val != expected
+                if op == 'contains':
+                    return expected in current_val
+                if op == 'not_contains':
+                    return expected not in current_val
+                if op == 'starts_with':
+                    return current_val.startswith(expected)
+                if op == 'ends_with':
+                    return current_val.endswith(expected)
+                if op == 'is_empty':
+                    return current_val == ''
+                if op == 'is_not_empty':
+                    return current_val != ''
+                return False
+
+            condition_match = True
+            for cond, idx in zip(normalized_conditions, condition_idx):
+                current_val = str(row[idx]).strip() if idx < len(row) else ''
+                if not matches_condition(current_val, cond):
+                    condition_match = False
+                    break
+
+            if condition_match and has_source_data:
+                moved_records.append(src_values)
+            elif has_source_data:
+                remaining_records.append(src_values)
+
+        updates = []
+
+        if moved_records:
+            for src_col_pos, dest_col in enumerate(normalized_destination_columns):
+                dest_values = [[record[src_col_pos]] for record in moved_records]
+                start = destination_start_row
+                end = destination_start_row + len(dest_values) - 1
+                updates.append({
+                    'range': f'{dest_col}{start}:{dest_col}{end}',
+                    'values': dest_values
+                })
+
+        source_span = last_relevant_row - data_start_row + 1
+        for src_col_pos, src_col in enumerate(normalized_source_columns):
+            compacted_values = [[record[src_col_pos]] for record in remaining_records]
+            while len(compacted_values) < source_span:
+                compacted_values.append([''])
+
+            updates.append({
+                'range': f'{src_col}{data_start_row}:{src_col}{last_relevant_row}',
+                'values': compacted_values
+            })
+
+        if updates:
+            sheets_service.update_cells_batch(worksheet, updates)
+
+        return jsonify({
+            'success': True,
+            'moved_count': len(moved_records),
+            'remaining_count': len(remaining_records),
+            'processed_rows': source_span,
+            'message': f"Moved {len(moved_records)} row(s) and compacted source columns {', '.join(normalized_source_columns)}"
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
