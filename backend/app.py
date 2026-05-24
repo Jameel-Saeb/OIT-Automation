@@ -1458,6 +1458,114 @@ def move_and_shift_columns():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/automation/remove-duplicates-and-shift', methods=['POST'])
+def remove_duplicates_and_shift():
+    """Remove cells in the source column whose value exactly matches any cell in
+    the lookup column (anywhere in the lookup column), then compact the source
+    column upward so there are no empty cells.
+    """
+    try:
+        user_session = _get_user_session()
+        sheets_service = user_session.sheets_service
+
+        data = request.json or {}
+        sheet_url = data.get('sheet_url')
+        sheet_name = data.get('sheet_name')
+        source_column = str(data.get('source_column', 'A')).strip().upper()
+        lookup_column = str(data.get('lookup_column', 'C')).strip().upper()
+        data_start_row = int(data.get('data_start_row', 2))
+
+        if not sheet_url or not sheet_name:
+            return jsonify({'success': False, 'error': 'Sheet URL and sheet name are required'}), 400
+
+        if not source_column or not lookup_column:
+            return jsonify({'success': False, 'error': 'Both source and lookup columns are required'}), 400
+
+        if data_start_row < 1:
+            return jsonify({'success': False, 'error': 'Data Start Row must be >= 1'}), 400
+
+        try:
+            authenticate_sheets_service(sheets_service, data)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+        def col_letter_to_index(letter):
+            idx = 0
+            for ch in letter:
+                if not ('A' <= ch <= 'Z'):
+                    raise ValueError(f'Invalid column letter: {letter}')
+                idx = idx * 26 + (ord(ch) - ord('A') + 1)
+            return idx - 1
+
+        try:
+            source_idx = col_letter_to_index(source_column)
+            lookup_idx = col_letter_to_index(lookup_column)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+        worksheet = sheets_service.connect(sheet_url, sheet_name)
+        columns = sheets_service.get_columns(worksheet)
+
+        if source_idx >= len(columns):
+            return jsonify({'success': False, 'error': f'Source column {source_column} not found in worksheet'}), 400
+        if lookup_idx >= len(columns):
+            return jsonify({'success': False, 'error': f'Lookup column {lookup_column} not found in worksheet'}), 400
+
+        source_col_values = list(columns[source_idx])
+        lookup_col_values = list(columns[lookup_idx])
+
+        # Build the lookup set from non-empty cells in the lookup column (whole column).
+        lookup_set = {
+            str(v).strip()
+            for v in lookup_col_values
+            if str(v).strip() != ''
+        }
+
+        # Walk the source column from data_start_row downward, keeping only
+        # values that DON'T appear in the lookup set. Preserve original order
+        # of survivors so we can write them back contiguously.
+        original_segment = source_col_values[data_start_row - 1:]
+        survivors = []
+        removed_count = 0
+        for v in original_segment:
+            s = str(v).strip()
+            if s == '':
+                continue
+            if s in lookup_set:
+                removed_count += 1
+                continue
+            survivors.append(s)
+
+        original_filled = sum(1 for v in original_segment if str(v).strip() != '')
+
+        # Write survivors back, then blank out the trailing cells that used to
+        # hold the now-removed values (so the column has no gaps).
+        segment_len = len(original_segment)
+        new_segment = [[s] for s in survivors] + [['']] * (segment_len - len(survivors))
+
+        if segment_len > 0:
+            end_row = data_start_row + segment_len - 1
+            range_name = f'{source_column}{data_start_row}:{source_column}{end_row}'
+            sheets_service.update_cells_batch(worksheet, [
+                {'range': range_name, 'values': new_segment}
+            ])
+
+        return jsonify({
+            'success': True,
+            'removed_count': removed_count,
+            'remaining_count': len(survivors),
+            'scanned_count': original_filled,
+            'message': (
+                f'Removed {removed_count} cell(s) from column {source_column} '
+                f'that matched values in column {lookup_column}; '
+                f'{len(survivors)} cell(s) remain.'
+            )
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/automation/logout', methods=['POST'])
 def logout():
     """Logout and close browser, and drop this user's session."""

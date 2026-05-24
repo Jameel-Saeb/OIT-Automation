@@ -159,7 +159,7 @@ async function refreshSheetConnection() {
 
 // Update connection indicators in all tabs
 function updateConnectionIndicators() {
-    const indicators = ['add', 'revoke', 'status', 'convert', 'compare'];
+    const indicators = ['add', 'revoke', 'status', 'convert', 'compare', 'remove-dup'];
     
     console.log('Updating indicators, isSheetConnected:', isSheetConnected);
     console.log('connectedSheetUrl:', connectedSheetUrl);
@@ -1709,6 +1709,73 @@ async function moveAndShiftColumns() {
         `);
     } catch (error) {
         showStatus('move-status', `Error: ${error.message}`, 'error');
+    }
+}
+
+async function removeDuplicatesAndShift() {
+    const sheetInfo = requireSheetConnection('remove-dup-status');
+    if (!sheetInfo) return;
+
+    showStatus('remove-dup-status', 'Refreshing sheet data...', 'info');
+    const refreshed = await refreshSheetConnection();
+    if (!refreshed) {
+        showStatus('remove-dup-status', 'Failed to refresh sheet connection', 'error');
+        return;
+    }
+
+    const sourceColumn = (document.getElementById('remove-dup-source-column')?.value || 'A').trim().toUpperCase();
+    const lookupColumn = (document.getElementById('remove-dup-lookup-column')?.value || 'C').trim().toUpperCase();
+    const dataStartRow = parseInt(document.getElementById('remove-dup-data-start-row').value, 10);
+
+    if (!sourceColumn || !lookupColumn) {
+        showStatus('remove-dup-status', 'Please select both source and lookup columns.', 'error');
+        return;
+    }
+    if (sourceColumn === lookupColumn) {
+        showStatus('remove-dup-status', 'Source and lookup columns must be different.', 'error');
+        return;
+    }
+    if (!Number.isInteger(dataStartRow) || dataStartRow < 1) {
+        showStatus('remove-dup-status', 'Data Start Row must be an integer >= 1.', 'error');
+        return;
+    }
+
+    clearStatus('remove-dup-status');
+    clearResults('remove-dup-results');
+    showStatus('remove-dup-status',
+        `Removing cells in column ${sourceColumn} that match any value in column ${lookupColumn}...`,
+        'info');
+
+    try {
+        const serviceAccountData = await getServiceAccountData();
+        const oauthState = getOAuthState();
+        const requestData = {
+            sheet_url: sheetInfo.url,
+            sheet_name: sheetInfo.name,
+            source_column: sourceColumn,
+            lookup_column: lookupColumn,
+            data_start_row: dataStartRow
+        };
+        if (oauthState) requestData.oauth_state = oauthState;
+        else Object.assign(requestData, serviceAccountData);
+
+        const result = await apiCall('/automation/remove-duplicates-and-shift', 'POST', requestData);
+        showStatus('remove-dup-status', result.message || 'Done.', 'success');
+
+        showResults('remove-dup-results', result, (r) => `
+            <table>
+                <thead>
+                    <tr><th>Metric</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Scanned cells in ${sourceColumn}</td><td>${r.scanned_count ?? 0}</td></tr>
+                    <tr><td>Removed (matched in ${lookupColumn})</td><td>${r.removed_count ?? 0}</td></tr>
+                    <tr><td>Remaining in ${sourceColumn}</td><td>${r.remaining_count ?? 0}</td></tr>
+                </tbody>
+            </table>
+        `);
+    } catch (error) {
+        showStatus('remove-dup-status', `Error: ${error.message}`, 'error');
     }
 }
 
